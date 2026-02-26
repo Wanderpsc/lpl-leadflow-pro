@@ -372,3 +372,205 @@ th {
     grid-template-columns: 1fr;
   }
 }
+
+/* ===== Modal de disparo ===== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.modal-box {
+  background: var(--card);
+  border-radius: 12px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  color: var(--muted);
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.modal-close:hover {
+  color: var(--text);
+}
+
+.modal-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.modal-count {
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.btn-sm {
+  padding: 5px 12px;
+  font-size: 13px;
+}
+
+.btn-outline {
+  background: transparent;
+  border: 1.5px solid var(--primary);
+  color: var(--primary);
+}
+
+.btn-outline:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+.modal-lead-list {
+  overflow-y: auto;
+  flex: 1;
+  padding: 8px 20px;
+}
+
+.modal-lead-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.modal-lead-item:last-child {
+  border-bottom: none;
+}
+
+.modal-lead-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--primary);
+}
+
+.modal-lead-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.modal-lead-name {
+  font-weight: 500;
+}
+
+.modal-lead-contact {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 10px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--border);
+  justify-content: flex-end;
+}
+
+.modal-footer .btn {
+  min-width: 140px;
+}
+
+/* ===== Prospecção ===== */
+.prospect-result-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .6rem .75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: .5rem;
+  background: var(--card-bg, #fff);
+  transition: background .2s;
+}
+
+.prospect-result-card.already-saved {
+  opacity: .55;
+}
+
+.prospect-result-info {
+  display: flex;
+  flex-direction: column;
+  gap: .15rem;
+  flex: 1;
+  min-width: 0;
+}
+
+.prospect-result-info strong {
+  font-size: .95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prospect-result-info small {
+  color: var(--muted, #666);
+  font-size: .75rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.prospect-stars {
+  font-size: .8rem;
+  color: #e6a817;
+}
+
+.prospect-types {
+  color: var(--accent, #2563eb) !important;
+  font-size: .72rem !important;
+  text-transform: capitalize;
+}
+
+.tbl-phone-input {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: .25rem .5rem;
+  font-size: .82rem;
+  width: 130px;
+}
+
+.error {
+  color: var(--danger, #dc2626);
+}
+
+/* ===== fim prospecção ===== */

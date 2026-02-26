@@ -357,6 +357,42 @@
         </article>
       </section>
 
+      <!-- ===== PROSPECÇÃO ===== -->
+      <section class="grid two-cols" id="prospectingSection">
+        <article class="card">
+          <h2>🔍 Prospecção via Google</h2>
+          <p class="small-muted">Busca empresas pelo Google Maps. Conforme LGPD, obtenha opt-in antes de disparar.</p>
+          <form id="prospectSearchForm" class="form">
+            <input id="prospectNiche" placeholder="Nicho (ex: academia, dentista)" required />
+            <input id="prospectCity"  placeholder="Cidade (ex: Curimatá)" />
+            <input id="prospectState" placeholder="Estado (ex: PI)" />
+            <input id="prospectCountry" placeholder="País" value="Brasil" />
+            <button class="btn" type="submit">Buscar negócios</button>
+          </form>
+          <p id="prospectSearchFeedback" class="feedback"></p>
+          <div id="prospectResultsPanel" class="hidden">
+            <div class="section-header">
+              <h3 id="prospectResultsTitle">Resultados</h3>
+              <small id="prospectResultsCount">0 encontrados</small>
+            </div>
+            <div id="prospectResultsList"></div>
+            <button id="prospectLoadMore" class="btn secondary hidden" style="margin-top:.5rem;width:100%">Carregar mais resultados</button>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="section-header">
+            <h2>📋 Prospects Salvos</h2>
+            <small id="prospectsCount">0 prospects</small>
+          </div>
+          <p class="small-muted">Após obter consentimento do responsável, clique em &ldquo;Converter em Lead&rdquo;.</p>
+          <div id="prospectsTable">
+            <p class="empty-state">Nenhum prospect salvo.</p>
+          </div>
+        </article>
+      </section>
+      <!-- ===== fim prospecção ===== -->
+
       <section class="grid two-cols">
         <article class="card">
           <h2>Cadastrar Lead (Opt-in)</h2>
@@ -441,6 +477,27 @@
       <span>Suporte comercial: <a href="mailto:wanderpsc@gmail.com">wanderpsc@gmail.com</a></span>
       <span>WhatsApp: <a href="https://wa.me/558981398723" target="_blank" rel="noopener noreferrer">+55 (89) 9 8139-8723</a></span>
     </footer>
+
+    <!-- Modal de seleção de leads para disparo -->
+    <div id="dispatchModal" class="modal-overlay hidden">
+      <div class="modal-box">
+        <div class="modal-header">
+          <h3 id="dispatchModalTitle">Selecionar leads para disparo</h3>
+          <button class="modal-close" id="dispatchModalClose">&times;</button>
+        </div>
+        <div class="modal-actions-bar">
+          <button class="btn btn-sm" id="dispatchSelectAll">Selecionar todos</button>
+          <button class="btn btn-sm btn-outline" id="dispatchDeselectAll">Desmarcar todos</button>
+          <span id="dispatchSelectedCount" class="modal-count">0 selecionados</span>
+        </div>
+        <div class="modal-lead-list" id="dispatchLeadList"></div>
+        <div class="modal-footer">
+          <button class="btn" id="dispatchConfirmBtn" disabled>Confirmar disparo</button>
+          <button class="btn btn-outline" id="dispatchCancelBtn">Cancelar</button>
+        </div>
+        <p id="dispatchModalFeedback" class="feedback"></p>
+      </div>
+    </div>
 
     <script src="./config.js"></script>
     <script src="./app.js"></script>

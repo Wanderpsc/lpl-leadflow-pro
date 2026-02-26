@@ -41,7 +41,7 @@ Este projeto é estruturado para uso **legal**:
 
 - Cadastro de leads com consentimento.
 - Criação de campanhas por nicho.
-- Simulação de disparo com status de entrega.
+- Disparo real via WhatsApp Cloud API quando configurado (com fallback para simulação de MVP).
 - Relatório consolidado de envios, recebimentos e atendimento.
 
 ## Como executar
@@ -181,6 +181,17 @@ Variáveis opcionais de ambiente no backend:
 - `LOGIN_ATTEMPT_WINDOW_MINUTES`
 - `MAX_LOGIN_ATTEMPTS`
 - `LOGIN_LOCK_MINUTES`
+
+Variáveis para envio real WhatsApp Cloud API:
+
+- `WHATSAPP_ACCESS_TOKEN`
+- `WHATSAPP_PHONE_NUMBER_ID`
+- `WHATSAPP_GRAPH_API_VERSION` (opcional, padrão: `v20.0`)
+
+Comportamento do disparo:
+
+- Campanha com canal `whatsapp` + variáveis configuradas: envio real para os telefones dos leads.
+- Campanha `whatsapp` sem configuração, ou outros canais (`instagram`, `facebook`, `email`): simulação de MVP.
 
 ## Auditoria de segurança (admin)
 

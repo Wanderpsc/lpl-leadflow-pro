@@ -368,6 +368,138 @@ function renderLeads(leads) {
     .join('');
 }
 
+// ===== Modal de disparo =====
+const dispatchModal = document.getElementById('dispatchModal');
+const dispatchModalTitle = document.getElementById('dispatchModalTitle');
+const dispatchModalClose = document.getElementById('dispatchModalClose');
+const dispatchSelectAll = document.getElementById('dispatchSelectAll');
+const dispatchDeselectAll = document.getElementById('dispatchDeselectAll');
+const dispatchSelectedCount = document.getElementById('dispatchSelectedCount');
+const dispatchLeadList = document.getElementById('dispatchLeadList');
+const dispatchConfirmBtn = document.getElementById('dispatchConfirmBtn');
+const dispatchCancelBtn = document.getElementById('dispatchCancelBtn');
+const dispatchModalFeedback = document.getElementById('dispatchModalFeedback');
+
+// ===== DOM Prospecção =====
+const prospectSearchForm    = document.getElementById('prospectSearchForm');
+const prospectNicheEl       = document.getElementById('prospectNiche');
+const prospectCityEl        = document.getElementById('prospectCity');
+const prospectStateEl       = document.getElementById('prospectState');
+const prospectCountryEl     = document.getElementById('prospectCountry');
+const prospectSearchFeedback = document.getElementById('prospectSearchFeedback');
+const prospectResultsPanel  = document.getElementById('prospectResultsPanel');
+const prospectResultsTitle  = document.getElementById('prospectResultsTitle');
+const prospectResultsCount  = document.getElementById('prospectResultsCount');
+const prospectResultsList   = document.getElementById('prospectResultsList');
+const prospectLoadMore      = document.getElementById('prospectLoadMore');
+const prospectsTable        = document.getElementById('prospectsTable');
+const prospectsCount        = document.getElementById('prospectsCount');
+
+let _prospectNextPageToken = null;
+let _lastProspectQuery     = {};
+
+let _dispatchCampaignId = null;
+let _dispatchCampaignName = '';
+
+function closeDispatchModal() {
+  dispatchModal.classList.add('hidden');
+  _dispatchCampaignId = null;
+  _dispatchCampaignName = '';
+  dispatchLeadList.innerHTML = '';
+  dispatchModalFeedback.textContent = '';
+  dispatchConfirmBtn.disabled = true;
+  dispatchConfirmBtn.textContent = 'Confirmar disparo';
+}
+
+function updateDispatchCount() {
+  const checked = dispatchLeadList.querySelectorAll('input[type="checkbox"]:checked').length;
+  dispatchSelectedCount.textContent = `${checked} selecionado${checked !== 1 ? 's' : ''}`;
+  dispatchConfirmBtn.disabled = checked === 0;
+}
+
+dispatchModalClose.addEventListener('click', closeDispatchModal);
+dispatchCancelBtn.addEventListener('click', closeDispatchModal);
+dispatchModal.addEventListener('click', (e) => { if (e.target === dispatchModal) closeDispatchModal(); });
+
+dispatchSelectAll.addEventListener('click', () => {
+  dispatchLeadList.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = true; });
+  updateDispatchCount();
+});
+
+dispatchDeselectAll.addEventListener('click', () => {
+  dispatchLeadList.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = false; });
+  updateDispatchCount();
+});
+
+dispatchConfirmBtn.addEventListener('click', async () => {
+  if (!_dispatchCampaignId) return;
+  const checked = [...dispatchLeadList.querySelectorAll('input[type="checkbox"]:checked')];
+  const leadIds = checked.map((cb) => cb.value);
+  if (!leadIds.length) return;
+
+  dispatchConfirmBtn.disabled = true;
+  dispatchConfirmBtn.textContent = 'Enviando...';
+  dispatchModalFeedback.textContent = '';
+
+  try {
+    const result = await http(`/api/campaigns/${_dispatchCampaignId}/send`, {
+      method: 'POST',
+      body: JSON.stringify({ leadIds })
+    });
+    setFeedback(dispatchModalFeedback, `Disparo concluído: ${result.leadsProcessed} leads processados.`);
+    setFeedback(campaignFeedback, `Campanha "${_dispatchCampaignName}": ${result.leadsProcessed} leads disparados.`);
+    await refreshDashboard();
+    setTimeout(closeDispatchModal, 1800);
+  } catch (error) {
+    setFeedback(dispatchModalFeedback, error.message, true);
+    dispatchConfirmBtn.disabled = false;
+    dispatchConfirmBtn.textContent = 'Confirmar disparo';
+  }
+});
+
+async function openDispatchModal(campaignId, campaignName) {
+  _dispatchCampaignId = campaignId;
+  _dispatchCampaignName = campaignName;
+  dispatchModalTitle.textContent = `Disparar: ${campaignName}`;
+  dispatchLeadList.innerHTML = '<p style="color:var(--muted);font-size:13px">Carregando leads...</p>';
+  dispatchModalFeedback.textContent = '';
+  dispatchConfirmBtn.disabled = true;
+  dispatchConfirmBtn.textContent = 'Confirmar disparo';
+  dispatchModal.classList.remove('hidden');
+
+  try {
+    const result = await http(`/api/campaigns/${campaignId}/leads`);
+    const leads = result.data || [];
+
+    if (!leads.length) {
+      dispatchLeadList.innerHTML = '<p style="color:var(--danger);font-size:13px">Nenhum lead elegível para esta campanha.</p>';
+      return;
+    }
+
+    dispatchLeadList.innerHTML = leads.map((lead) => {
+      const contact = [lead.phone, lead.email].filter(Boolean).join(' / ') || '-';
+      return `
+        <label class="modal-lead-item">
+          <input type="checkbox" value="${lead.id}" />
+          <span class="modal-lead-info">
+            <span class="modal-lead-name">${lead.full_name}</span>
+            <span class="modal-lead-contact">${contact}</span>
+          </span>
+        </label>
+      `;
+    }).join('');
+
+    dispatchLeadList.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      cb.addEventListener('change', updateDispatchCount);
+    });
+
+    updateDispatchCount();
+  } catch (error) {
+    dispatchLeadList.innerHTML = `<p style="color:var(--danger);font-size:13px">${error.message}</p>`;
+  }
+}
+// ===== fim modal =====
+
 function renderCampaigns(campaigns) {
   campaignsCount.textContent = `${campaigns.length} registros`;
 
@@ -383,27 +515,17 @@ function renderCampaigns(campaigns) {
           <td>${campaign.name}</td>
           <td>${campaign.niche}</td>
           <td>${campaign.channel}</td>
-          <td><button class="btn" data-send-id="${campaign.id}">Disparar</button></td>
+          <td><button class="btn" data-send-id="${campaign.id}" data-send-name="${campaign.name}">Disparar</button></td>
         </tr>
       `
     )
     .join('');
 
   campaignsTable.querySelectorAll('[data-send-id]').forEach((button) => {
-    button.addEventListener('click', async () => {
+    button.addEventListener('click', () => {
       const campaignId = button.getAttribute('data-send-id');
-      button.disabled = true;
-      button.textContent = 'Enviando...';
-      try {
-        const result = await http(`/api/campaigns/${campaignId}/send`, { method: 'POST' });
-        setFeedback(campaignFeedback, `Disparo concluído: ${result.leadsProcessed} leads processados.`);
-        await refreshDashboard();
-      } catch (error) {
-        setFeedback(campaignFeedback, error.message, true);
-      } finally {
-        button.disabled = false;
-        button.textContent = 'Disparar';
-      }
+      const campaignName = button.getAttribute('data-send-name') || 'Campanha';
+      openDispatchModal(campaignId, campaignName);
     });
   });
 }
@@ -612,6 +734,7 @@ async function refreshDashboard() {
   renderCampaigns(campaigns.data || []);
   renderSummary(summary);
   renderReportsHistory(reportsHistory.data || []);
+  loadProspects();
 
   if (licenseInfo?.license && !isAdmin()) {
     const remaining =
@@ -1061,6 +1184,177 @@ adminPlanForm?.addEventListener('submit', async (event) => {
     setFeedback(planFeedback, error.message, true);
   }
 });
+
+// ===== Prospecção – funções =====
+
+function renderProspectResults(results, append) {
+  if (!append) prospectResultsList.innerHTML = '';
+  if (!results || results.length === 0) {
+    if (!append) prospectResultsList.innerHTML = '<p class="empty-state">Nenhum resultado encontrado.</p>';
+    return;
+  }
+  results.forEach((place) => {
+    const card = document.createElement('div');
+    card.className = 'prospect-result-card' + (place.already_saved ? ' already-saved' : '');
+    const stars = place.rating ? '★'.repeat(Math.round(place.rating)) + ' ' + place.rating.toFixed(1) : '';
+    card.innerHTML = `
+      <div class="prospect-result-info">
+        <strong>${place.name}</strong>
+        ${stars ? `<span class="prospect-stars">${stars} <small>(${place.total_ratings})</small></span>` : ''}
+        <small>${place.address}</small>
+        ${place.types?.length ? `<small class="prospect-types">${place.types.join(' • ')}</small>` : ''}
+      </div>
+      <button class="btn btn-sm" ${place.already_saved ? 'disabled' : ''} data-place-id="${place.place_id}" data-name="${encodeURIComponent(place.name)}" data-address="${encodeURIComponent(place.address)}" data-niche="${encodeURIComponent(place.niche)}" data-location="${encodeURIComponent(place.location)}" data-rating="${place.rating || ''}" data-total="${place.total_ratings || 0}">
+        ${place.already_saved ? 'Salvo ✓' : 'Salvar prospect'}
+      </button>
+    `;
+    if (!place.already_saved) {
+      card.querySelector('button').addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const payload = {
+          place_id: btn.dataset.placeId,
+          name: decodeURIComponent(btn.dataset.name),
+          address: decodeURIComponent(btn.dataset.address),
+          niche: decodeURIComponent(btn.dataset.niche),
+          location: decodeURIComponent(btn.dataset.location),
+          rating: btn.dataset.rating ? Number(btn.dataset.rating) : null,
+          total_ratings: Number(btn.dataset.total)
+        };
+        try {
+          await http('/api/prospects', { method: 'POST', body: JSON.stringify(payload) });
+          btn.textContent = 'Salvo ✓';
+          btn.disabled = true;
+          card.classList.add('already-saved');
+          await loadProspects();
+        } catch (err) {
+          setFeedback(prospectSearchFeedback, err.message, true);
+        }
+      });
+    }
+    prospectResultsList.appendChild(card);
+  });
+}
+
+async function loadProspects() {
+  try {
+    const res = await http('/api/prospects');
+    const list = res.data || [];
+    if (prospectsCount) prospectsCount.textContent = `${list.length} prospect${list.length !== 1 ? 's' : ''}`;
+    if (!prospectsTable) return;
+    if (list.length === 0) {
+      prospectsTable.innerHTML = '<p class="empty-state">Nenhum prospect salvo.</p>';
+      return;
+    }
+    prospectsTable.innerHTML = `
+      <table class="data-table">
+        <thead><tr><th>Nome</th><th>Nicho</th><th>Local</th><th>Telefone</th><th>Ações</th></tr></thead>
+        <tbody>
+          ${list.map((p) => `
+            <tr>
+              <td>${p.name}</td>
+              <td>${p.niche}</td>
+              <td>${p.location || p.address || '-'}</td>
+              <td><input class="tbl-phone-input" data-id="${p.id}" placeholder="WhatsApp do responsável" value="${p.phone || ''}" /></td>
+              <td>
+                <button class="btn btn-sm convert-prospect-btn" data-id="${p.id}">Converter em Lead</button>
+                <button class="btn btn-sm secondary remove-prospect-btn" data-id="${p.id}">✕</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+
+    prospectsTable.querySelectorAll('.remove-prospect-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Remover este prospect?')) return;
+        try {
+          await http(`/api/prospects/${btn.dataset.id}`, { method: 'DELETE' });
+          await loadProspects();
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+    });
+
+    prospectsTable.querySelectorAll('.convert-prospect-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest('tr');
+        const phoneInput = row.querySelector('.tbl-phone-input');
+        const phone = phoneInput ? phoneInput.value.trim() : '';
+        if (!phone) {
+          alert('Preencha o telefone/WhatsApp do responsável antes de converter.');
+          return;
+        }
+        if (!confirm('Confirmo que obtive o opt-in deste contato e autorizo a conversão em lead.')) return;
+        try {
+          await http(`/api/prospects/${btn.dataset.id}/convert`, {
+            method: 'POST',
+            body: JSON.stringify({ phone, consent: true, source: 'Prospecção Google' })
+          });
+          await Promise.all([loadProspects(), refreshDashboard()]);
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+    });
+  } catch (err) {
+    if (prospectsTable) prospectsTable.innerHTML = `<p class="empty-state error">${err.message}</p>`;
+  }
+}
+
+prospectSearchForm && prospectSearchForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  _prospectNextPageToken = null;
+  const query = {
+    niche: prospectNicheEl.value.trim(),
+    city: prospectCityEl.value.trim(),
+    state: prospectStateEl.value.trim(),
+    country: prospectCountryEl.value.trim() || 'Brasil'
+  };
+  _lastProspectQuery = query;
+  setFeedback(prospectSearchFeedback, 'Buscando…');
+  try {
+    const res = await http('/api/prospects/search', { method: 'POST', body: JSON.stringify(query) });
+    setFeedback(prospectSearchFeedback, '');
+    _prospectNextPageToken = res.next_page_token || null;
+    prospectResultsTitle.textContent = `Resultados para "${res.query}"`;
+    prospectResultsCount.textContent = `${res.total} encontrados`;
+    prospectResultsPanel.classList.remove('hidden');
+    renderProspectResults(res.data, false);
+    if (_prospectNextPageToken) {
+      prospectLoadMore.classList.remove('hidden');
+    } else {
+      prospectLoadMore.classList.add('hidden');
+    }
+  } catch (err) {
+    setFeedback(prospectSearchFeedback, err.message, true);
+  }
+});
+
+prospectLoadMore && prospectLoadMore.addEventListener('click', async () => {
+  if (!_prospectNextPageToken) return;
+  try {
+    prospectLoadMore.disabled = true;
+    const res = await http('/api/prospects/search', {
+      method: 'POST',
+      body: JSON.stringify({ ..._lastProspectQuery, pagetoken: _prospectNextPageToken })
+    });
+    _prospectNextPageToken = res.next_page_token || null;
+    prospectResultsCount.textContent = `${prospectResultsList.children.length + res.total} encontrados`;
+    renderProspectResults(res.data, true);
+    if (_prospectNextPageToken) {
+      prospectLoadMore.disabled = false;
+    } else {
+      prospectLoadMore.classList.add('hidden');
+    }
+  } catch (err) {
+    setFeedback(prospectSearchFeedback, err.message, true);
+    prospectLoadMore.disabled = false;
+  }
+});
+
+// ===== fim prospecção =====
 
 refreshAll.addEventListener('click', async () => {
   try {

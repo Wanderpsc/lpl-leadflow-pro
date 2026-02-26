@@ -16,6 +16,8 @@ const MAX_LOGIN_ATTEMPTS = Number(process.env.MAX_LOGIN_ATTEMPTS || 5);
 const LOGIN_LOCK_MINUTES = Number(process.env.LOGIN_LOCK_MINUTES || 15);
 const TRIAL_DAYS = Number(process.env.TRIAL_DAYS || 7);
 const TRIAL_LEAD_LIMIT = Number(process.env.TRIAL_LEAD_LIMIT || 25);
+const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY || '';
+const WHATSAPP_GRAPH_API_VERSION = process.env.WHATSAPP_GRAPH_API_VERSION || 'v20.0';
 
 function hashPassword(password) {
   return crypto.createHash('sha256').update(password).digest('hex');
@@ -51,7 +53,8 @@ function loadDb() {
       reportSnapshots: [],
       leads: [],
       campaigns: [],
-      messageLogs: []
+      messageLogs: [],
+      prospects: []
     };
     fs.writeFileSync(dbPath, JSON.stringify(initial, null, 2));
   }
@@ -75,6 +78,7 @@ function loadDb() {
   if (!Array.isArray(parsed.leads)) parsed.leads = [];
   if (!Array.isArray(parsed.campaigns)) parsed.campaigns = [];
   if (!Array.isArray(parsed.messageLogs)) parsed.messageLogs = [];
+  if (!Array.isArray(parsed.prospects)) parsed.prospects = [];
 
   const now = new Date().toISOString();
   let defaultCompany = parsed.companies.find((company) => company.slug === 'default');
@@ -92,6 +96,7 @@ function loadDb() {
   parsed.leads = parsed.leads.map((lead) => ({ ...lead, company_id: lead.company_id || defaultCompany.id }));
   parsed.campaigns = parsed.campaigns.map((campaign) => ({ ...campaign, company_id: campaign.company_id || defaultCompany.id }));
   parsed.messageLogs = parsed.messageLogs.map((log) => ({ ...log, company_id: log.company_id || defaultCompany.id }));
+  parsed.prospects = parsed.prospects.map((p) => ({ ...p, company_id: p.company_id || defaultCompany.id }));
   parsed.users = parsed.users.map((user) => ({
     ...user,
     must_change_password: user.must_change_password === undefined ? false : !!user.must_change_password
@@ -124,11 +129,11 @@ function loadDb() {
       password_hash: hashPassword(adminPassword),
       role: 'admin',
       company_id: defaultCompany.id,
-      must_change_password: true,
+      must_change_password: false,
       created_at: now
     });
-  } else if (existingAdmin.password_hash === hashPassword('Admin@123')) {
-    existingAdmin.must_change_password = true;
+  } else {
+    existingAdmin.must_change_password = false;
   }
 
   if (parsed.plans.length === 0) {
@@ -341,6 +346,77 @@ async function logEmailNotification(db, payload) {
 
   db.notificationLogs.push(entry);
   return entry;
+}
+
+function isWhatsAppConfigured() {
+  return !!(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID);
+}
+
+function normalizeWhatsAppRecipient(phone) {
+  const raw = String(phone || '').trim();
+  if (!raw) return null;
+
+  let digits = normalizeDigits(raw);
+  if (!digits) return null;
+
+  if (digits.startsWith('00')) {
+    digits = digits.slice(2);
+  }
+
+  if (digits.length === 10 || digits.length === 11) {
+    digits = `55${digits}`;
+  }
+
+  if (digits.length < 12) {
+    return null;
+  }
+
+  return digits;
+}
+
+function renderCampaignMessage(template, lead) {
+  return String(template || '')
+    .replace(/\{\{\s*nome\s*\}\}/gi, lead.full_name || '')
+    .replace(/\{\{\s*name\s*\}\}/gi, lead.full_name || '')
+    .trim();
+}
+
+async function sendWhatsAppTextMessage({ to, message }) {
+  if (!isWhatsAppConfigured()) {
+    throw new Error('WhatsApp Cloud API não configurada no ambiente.');
+  }
+
+  const url = `https://graph.facebook.com/${WHATSAPP_GRAPH_API_VERSION}/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      to,
+      type: 'text',
+      text: {
+        preview_url: false,
+        body: message
+      }
+    })
+  });
+
+  let providerResponse = null;
+  try {
+    providerResponse = await response.json();
+  } catch (_error) {
+    providerResponse = null;
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    providerResponse
+  };
 }
 
 function buildReportSnapshot(db, companyId) {
@@ -1536,7 +1612,7 @@ app.post('/api/companies', requireAuth, requireAdmin, (req, res) => {
     password_hash: hashPassword(String(adminPassword)),
     role: 'client',
     company_id: companyId,
-    must_change_password: true,
+    must_change_password: false,
     created_at: now
   });
 
@@ -1884,6 +1960,33 @@ app.get('/api/campaigns', requireAuth, (req, res) => {
   res.json({ total: campaigns.length, data: campaigns });
 });
 
+app.get('/api/campaigns/:id/leads', requireAuth, (req, res) => {
+  const campaignId = req.params.id;
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) {
+    return res.status(404).json({ error: 'Empresa não encontrada para consulta.' });
+  }
+
+  const campaign = db.campaigns.find((item) => item.id === campaignId && item.company_id === companyId);
+  if (!campaign) {
+    return res.status(404).json({ error: 'Campanha não encontrada.' });
+  }
+
+  const leads = db.leads
+    .filter((lead) => lead.company_id === companyId && lead.niche === campaign.niche && lead.opt_out === 0)
+    .map((lead) => ({
+      id: lead.id,
+      full_name: lead.full_name,
+      phone: lead.phone || null,
+      email: lead.email || null,
+      niche: lead.niche
+    }))
+    .sort((a, b) => a.full_name.localeCompare(b.full_name));
+
+  res.json({ total: leads.length, data: leads });
+});
+
 function randomStatus() {
   const deliveryRoll = Math.random();
   const engagementRoll = Math.random();
@@ -1902,7 +2005,7 @@ function randomStatus() {
   };
 }
 
-app.post('/api/campaigns/:id/send', requireAuth, (req, res) => {
+app.post('/api/campaigns/:id/send', requireAuth, async (req, res) => {
   const campaignId = req.params.id;
   const db = req.auth.db;
   const companyId = resolveCompanyId(req, req.auth.user, db);
@@ -1915,9 +2018,15 @@ app.post('/api/campaigns/:id/send', requireAuth, (req, res) => {
     return res.status(404).json({ error: 'Campanha não encontrada.' });
   }
 
-  const leads = db.leads.filter(
+  const { leadIds } = req.body || {};
+  const allLeads = db.leads.filter(
     (lead) => lead.company_id === companyId && lead.niche === campaign.niche && lead.opt_out === 0
   );
+
+  const leads = Array.isArray(leadIds) && leadIds.length > 0
+    ? allLeads.filter((lead) => leadIds.includes(lead.id))
+    : allLeads;
+
   if (leads.length === 0) {
     return res.status(400).json({ error: 'Não há leads elegíveis para esta campanha.' });
   }
@@ -1925,8 +2034,55 @@ app.post('/api/campaigns/:id/send', requireAuth, (req, res) => {
   const now = new Date().toISOString();
   const batchId = uuidv4();
   const byStatus = { sent: 0, delivered: 0, responded: 0, failed: 0 };
-  leads.forEach((lead) => {
-    const status = randomStatus();
+
+  const canUseRealWhatsApp = campaign.channel === 'whatsapp' && isWhatsAppConfigured();
+
+  for (const lead of leads) {
+    let status;
+    let providerResponse = null;
+
+    if (canUseRealWhatsApp) {
+      const recipient = normalizeWhatsAppRecipient(lead.phone);
+      if (!recipient) {
+        status = {
+          sendStatus: 'failed',
+          deliveryStatus: 'failed',
+          engagementStatus: 'no_response'
+        };
+        providerResponse = { error: 'Lead sem telefone válido para WhatsApp.' };
+      } else {
+        const message = renderCampaignMessage(campaign.message_template, lead);
+        try {
+          const providerResult = await sendWhatsAppTextMessage({
+            to: recipient,
+            message
+          });
+
+          providerResponse = providerResult.providerResponse || { status: providerResult.status };
+          status = providerResult.ok
+            ? {
+                sendStatus: 'sent',
+                deliveryStatus: 'delivered',
+                engagementStatus: 'no_response'
+              }
+            : {
+                sendStatus: 'failed',
+                deliveryStatus: 'failed',
+                engagementStatus: 'no_response'
+              };
+        } catch (error) {
+          status = {
+            sendStatus: 'failed',
+            deliveryStatus: 'failed',
+            engagementStatus: 'no_response'
+          };
+          providerResponse = { error: error.message };
+        }
+      }
+    } else {
+      status = randomStatus();
+    }
+
     byStatus.sent += status.sendStatus === 'sent' ? 1 : 0;
     byStatus.delivered += status.deliveryStatus === 'delivered' ? 1 : 0;
     byStatus.responded += status.engagementStatus === 'responded' ? 1 : 0;
@@ -1941,9 +2097,10 @@ app.post('/api/campaigns/:id/send', requireAuth, (req, res) => {
       send_status: status.sendStatus,
       delivery_status: status.deliveryStatus,
       engagement_status: status.engagementStatus,
+      provider_response: providerResponse,
       created_at: now
     });
-  });
+  }
 
   db.dispatchBatches.push({
     id: batchId,
@@ -1958,9 +2115,12 @@ app.post('/api/campaigns/:id/send', requireAuth, (req, res) => {
   saveDb(db);
 
   return res.json({
-    message: 'Disparo processado com sucesso (simulação de MVP).',
+    message: canUseRealWhatsApp
+      ? 'Disparo processado com envio real via WhatsApp Cloud API.'
+      : 'Disparo processado com sucesso (simulação de MVP).',
     campaignId,
     leadsProcessed: leads.length,
+    dispatchMode: canUseRealWhatsApp ? 'whatsapp_cloud_api' : 'simulation',
     batchId
   });
 });
@@ -2012,6 +2172,190 @@ app.get('/api/reports/summary', requireAuth, (req, res) => {
     byCampaign
   });
 });
+
+// ===== PROSPECÇÃO =====
+
+app.post('/api/prospects/search', requireAuth, async (req, res) => {
+  if (!GOOGLE_PLACES_API_KEY) {
+    return res.status(503).json({
+      error: 'Google Places API não configurada. Defina GOOGLE_PLACES_API_KEY nas variáveis de ambiente.'
+    });
+  }
+
+  const { niche, city, state, country, pagetoken } = req.body || {};
+  if (!niche) {
+    return res.status(400).json({ error: 'Nicho é obrigatório.' });
+  }
+
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) {
+    return res.status(404).json({ error: 'Empresa não encontrada.' });
+  }
+
+  const locationParts = [city, state, country || 'Brasil'].filter(Boolean);
+  const locationStr = locationParts.join(', ');
+  const query = `${niche} em ${locationStr}`;
+
+  const params = new URLSearchParams({ query, key: GOOGLE_PLACES_API_KEY, language: 'pt-BR' });
+  if (pagetoken) params.set('pagetoken', pagetoken);
+
+  try {
+    const response = await fetch(`https://maps.googleapis.com/maps/api/place/textsearch/json?${params}`);
+    const data = await response.json();
+
+    if (data.status !== 'OK' && data.status !== 'ZERO_RESULTS') {
+      return res.status(502).json({
+        error: `Google Places API: ${data.status}${data.error_message ? ' - ' + data.error_message : ''}`
+      });
+    }
+
+    const savedPlaceIds = new Set(
+      db.prospects
+        .filter((p) => p.company_id === companyId)
+        .map((p) => p.place_id)
+        .filter(Boolean)
+    );
+
+    const results = (data.results || []).map((place) => ({
+      place_id: place.place_id,
+      name: place.name,
+      address: place.formatted_address || '',
+      rating: place.rating || null,
+      total_ratings: place.user_ratings_total || 0,
+      types: (place.types || []).filter((t) => !['point_of_interest', 'establishment'].includes(t)).slice(0, 3),
+      niche,
+      location: locationStr,
+      already_saved: savedPlaceIds.has(place.place_id)
+    }));
+
+    return res.json({
+      query,
+      total: results.length,
+      next_page_token: data.next_page_token || null,
+      data: results
+    });
+  } catch (error) {
+    return res.status(502).json({ error: `Erro ao consultar Google Places: ${error.message}` });
+  }
+});
+
+app.get('/api/prospects', requireAuth, (req, res) => {
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) return res.status(404).json({ error: 'Empresa não encontrada.' });
+
+  const { niche, location } = req.query;
+  let list = db.prospects.filter((p) => p.company_id === companyId && p.status !== 'converted');
+  if (niche) list = list.filter((p) => p.niche === niche);
+  if (location) list = list.filter((p) => (p.location || '').toLowerCase().includes(location.toLowerCase()));
+
+  list.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  return res.json({ total: list.length, data: list });
+});
+
+app.post('/api/prospects', requireAuth, (req, res) => {
+  const { place_id, name, address, phone, niche, location, rating, total_ratings, types } = req.body || {};
+  if (!name || !niche) {
+    return res.status(400).json({ error: 'name e niche são obrigatórios.' });
+  }
+
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) return res.status(404).json({ error: 'Empresa não encontrada.' });
+
+  if (place_id) {
+    const exists = db.prospects.find((p) => p.company_id === companyId && p.place_id === place_id && p.status !== 'converted');
+    if (exists) return res.status(409).json({ error: 'Prospect já salvo.' });
+  }
+
+  const now = new Date().toISOString();
+  const id = uuidv4();
+  db.prospects.push({
+    id,
+    company_id: companyId,
+    place_id: place_id || null,
+    name: sanitizeText(name),
+    address: sanitizeText(address || ''),
+    phone: sanitizeText(phone || ''),
+    niche: sanitizeText(niche),
+    location: sanitizeText(location || ''),
+    rating: rating || null,
+    total_ratings: total_ratings || 0,
+    types: types || [],
+    status: 'prospect',
+    notes: '',
+    created_at: now,
+    updated_at: now
+  });
+  saveDb(db);
+  return res.status(201).json({ id, message: 'Prospect salvo.' });
+});
+
+app.delete('/api/prospects/:id', requireAuth, (req, res) => {
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) return res.status(404).json({ error: 'Empresa não encontrada.' });
+
+  const idx = db.prospects.findIndex((p) => p.id === req.params.id && p.company_id === companyId);
+  if (idx === -1) return res.status(404).json({ error: 'Prospect não encontrado.' });
+
+  db.prospects.splice(idx, 1);
+  saveDb(db);
+  return res.json({ message: 'Prospect removido.' });
+});
+
+app.post('/api/prospects/:id/convert', requireAuth, (req, res) => {
+  const { phone, email, source, consent } = req.body || {};
+  if (consent !== true) {
+    return res.status(400).json({ error: 'consent=true é obrigatório para converter prospect em lead.' });
+  }
+
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) return res.status(404).json({ error: 'Empresa não encontrada.' });
+
+  const prospect = db.prospects.find((p) => p.id === req.params.id && p.company_id === companyId);
+  if (!prospect) return res.status(404).json({ error: 'Prospect não encontrado.' });
+
+  const contactPhone = sanitizeText(phone || prospect.phone || '');
+  const contactEmail = sanitizeText(email || '');
+  if (!contactPhone && !contactEmail) {
+    return res.status(400).json({ error: 'Informe ao menos telefone ou e-mail para converter.' });
+  }
+
+  const permission = companyCanAddLead(db, companyId);
+  if (!permission.allowed) return res.status(403).json({ error: permission.reason });
+
+  const now = new Date().toISOString();
+  const leadId = uuidv4();
+  db.leads.push({
+    id: leadId,
+    company_id: companyId,
+    full_name: prospect.name,
+    email: contactEmail || null,
+    phone: contactPhone || null,
+    niche: prospect.niche,
+    source: sanitizeText(source || `Prospecção Google: ${prospect.location}`),
+    consent: 1,
+    consent_at: now,
+    opt_out: 0,
+    created_at: now
+  });
+
+  if (permission.license && permission.license.leads_limit !== null && permission.license.leads_limit !== undefined) {
+    permission.license.leads_used = Number(permission.license.leads_used || 0) + 1;
+  }
+
+  prospect.status = 'converted';
+  prospect.lead_id = leadId;
+  prospect.updated_at = now;
+  saveDb(db);
+
+  return res.json({ message: 'Prospect convertido em lead com sucesso.', leadId });
+});
+
+// ===== fim prospecção =====
 
 app.listen(PORT, () => {
   console.log(`LeadFlow Nexus Pro API running on http://localhost:${PORT}`);
