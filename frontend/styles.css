@@ -109,6 +109,43 @@ body {
   background: #f8fbff;
 }
 
+.checkout-steps {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.checkout-steps span {
+  font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.checkout-steps span.active {
+  border-color: #cfe0ff;
+  background: #eef4ff;
+  color: #1d3669;
+}
+
+.checkout-review {
+  margin: 0;
+  background: #f8fbff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+}
+
+.inline-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .payment-box h4 {
   margin: 0 0 8px;
 }

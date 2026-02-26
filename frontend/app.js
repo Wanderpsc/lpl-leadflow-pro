@@ -14,6 +14,7 @@ let session = {
 };
 
 let pendingSaleId = null;
+let checkoutStep = 1;
 
 const authScreen = document.getElementById('authScreen');
 const appScreen = document.getElementById('appScreen');
@@ -21,16 +22,23 @@ const appTopbar = document.getElementById('appTopbar');
 const loginForm = document.getElementById('loginForm');
 const loginFeedback = document.getElementById('loginFeedback');
 const fillDemoBtn = document.getElementById('fillDemoBtn');
-const trialForm = document.getElementById('trialForm');
-const trialFeedback = document.getElementById('trialFeedback');
 const checkoutForm = document.getElementById('checkoutForm');
 const checkoutFeedback = document.getElementById('checkoutFeedback');
 const paymentBox = document.getElementById('paymentBox');
 const paymentInfo = document.getElementById('paymentInfo');
 const confirmPaymentBtn = document.getElementById('confirmPaymentBtn');
+const checkoutReview = document.getElementById('checkoutReview');
 const planSelect = document.getElementById('planSelect');
 const paymentMethodSelect = document.getElementById('paymentMethodSelect');
 const installmentsSelect = document.getElementById('installmentsSelect');
+const checkoutStepBlocks = Array.from(document.querySelectorAll('.checkout-step'));
+const checkoutIndicators = Array.from(document.querySelectorAll('[data-step-indicator]'));
+const checkoutNext1 = document.getElementById('checkoutNext1');
+const checkoutNext2 = document.getElementById('checkoutNext2');
+const checkoutNext3 = document.getElementById('checkoutNext3');
+const checkoutBack2 = document.getElementById('checkoutBack2');
+const checkoutBack3 = document.getElementById('checkoutBack3');
+const checkoutBack4 = document.getElementById('checkoutBack4');
 const showRecoveryBtn = document.getElementById('showRecoveryBtn');
 const hideRecoveryBtn = document.getElementById('hideRecoveryBtn');
 const recoverySection = document.getElementById('recoverySection');
@@ -78,6 +86,10 @@ const campaignForm = document.getElementById('campaignForm');
 const leadFeedback = document.getElementById('leadFeedback');
 const campaignFeedback = document.getElementById('campaignFeedback');
 const refreshAll = document.getElementById('refreshAll');
+const generateReportBtn = document.getElementById('generateReportBtn');
+const reportFeedback = document.getElementById('reportFeedback');
+const reportsTable = document.getElementById('reportsTable');
+const reportsCount = document.getElementById('reportsCount');
 
 function setFeedback(element, message, isError = false) {
   if (!element) return;
@@ -405,12 +417,184 @@ function renderSummary(summary) {
   metricRate.textContent = `${summary.responseRate ?? 0}%`;
 }
 
+function setCheckoutStep(targetStep) {
+  checkoutStep = Math.max(1, Math.min(4, Number(targetStep) || 1));
+
+  checkoutStepBlocks.forEach((block) => {
+    const blockStep = Number(block.getAttribute('data-step') || 0);
+    block.classList.toggle('hidden', blockStep !== checkoutStep);
+  });
+
+  checkoutIndicators.forEach((item) => {
+    const itemStep = Number(item.getAttribute('data-step-indicator') || 0);
+    item.classList.toggle('active', itemStep === checkoutStep);
+  });
+}
+
+function collectCheckoutData() {
+  if (!checkoutForm) return {};
+  const formData = new FormData(checkoutForm);
+  const value = (name) => formData.get(name)?.toString().trim() || '';
+
+  return {
+    name: value('name'),
+    ownerName: value('ownerName'),
+    slug: value('slug').toLowerCase(),
+    adminEmail: value('adminEmail').toLowerCase(),
+    adminPassword: formData.get('adminPassword')?.toString() || '',
+    buyerName: value('buyerName'),
+    buyerEmail: value('buyerEmail').toLowerCase(),
+    buyerPhone: value('buyerPhone'),
+    buyerDocument: value('buyerDocument'),
+    addressStreet: value('addressStreet'),
+    addressNumber: value('addressNumber'),
+    addressComplement: value('addressComplement'),
+    addressDistrict: value('addressDistrict'),
+    addressCity: value('addressCity'),
+    addressState: value('addressState').toUpperCase(),
+    addressZipCode: value('addressZipCode'),
+    planId: value('planId'),
+    paymentMethod: value('paymentMethod'),
+    installments: Number(value('installments') || 1)
+  };
+}
+
+function validateStep(step) {
+  const payload = collectCheckoutData();
+
+  if (step === 1) {
+    if (!payload.name || !payload.ownerName || !payload.slug || !payload.adminEmail || !payload.adminPassword) {
+      throw new Error('Preencha todos os dados da empresa e acesso.');
+    }
+    if (!payload.buyerName || !payload.buyerEmail || !payload.buyerPhone || !payload.buyerDocument) {
+      throw new Error('Preencha todos os dados pessoais do comprador.');
+    }
+  }
+
+  if (step === 2) {
+    if (!payload.addressStreet || !payload.addressNumber || !payload.addressDistrict || !payload.addressCity || !payload.addressState || !payload.addressZipCode) {
+      throw new Error('Preencha o endereço completo para faturamento.');
+    }
+  }
+
+  if (step === 3) {
+    if (!payload.planId || !payload.paymentMethod) {
+      throw new Error('Selecione plano e forma de pagamento.');
+    }
+    if (payload.paymentMethod === 'card' && (!payload.installments || payload.installments < 1)) {
+      throw new Error('Parcelamento inválido para pagamento com cartão.');
+    }
+  }
+
+  return payload;
+}
+
+function renderCheckoutReview() {
+  if (!checkoutReview) return;
+  const payload = collectCheckoutData();
+  checkoutReview.textContent = [
+    `Empresa: ${payload.name}`,
+    `Responsável: ${payload.ownerName}`,
+    `Slug: ${payload.slug}`,
+    `Login principal: ${payload.adminEmail}`,
+    `Comprador: ${payload.buyerName} • ${payload.buyerEmail} • ${payload.buyerPhone}`,
+    `Documento: ${payload.buyerDocument}`,
+    `Endereço: ${payload.addressStreet}, ${payload.addressNumber} ${payload.addressComplement ? '- ' + payload.addressComplement : ''}`,
+    `${payload.addressDistrict} • ${payload.addressCity}/${payload.addressState} • CEP ${payload.addressZipCode}`,
+    `Pagamento: ${payload.paymentMethod === 'card' ? 'Cartão' : 'Pix'} • ${payload.installments || 1}x`
+  ].join('\n');
+}
+
+function renderReportsHistory(rows) {
+  if (!reportsTable || !reportsCount) return;
+
+  reportsCount.textContent = `${rows.length} registros`;
+  if (!rows.length) {
+    reportsTable.innerHTML = '<tr><td colspan="6">Nenhum relatório salvo.</td></tr>';
+    return;
+  }
+
+  reportsTable.innerHTML = rows
+    .map((row) => {
+      const summary = row.summary || {};
+      const created = new Date(row.created_at);
+      const createdText = Number.isNaN(created.getTime()) ? '-' : created.toLocaleString('pt-BR');
+      return `
+        <tr>
+          <td>${createdText}</td>
+          <td>${summary.total_leads ?? 0}</td>
+          <td>${summary.total_messages ?? 0}</td>
+          <td>${summary.response_rate ?? 0}%</td>
+          <td>${moneyBRL(summary.total_revenue_brl ?? 0)}</td>
+          <td><button class="btn secondary" data-print-report="${row.id}">Imprimir</button></td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  reportsTable.querySelectorAll('[data-print-report]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      const reportId = button.getAttribute('data-print-report');
+      if (!reportId || !session.token) return;
+
+      try {
+        const html = await requestHtmlWithFallback(`/api/reports/${reportId}/print`, {
+          headers: { Authorization: `Bearer ${session.token}` }
+        });
+
+        const printWindow = window.open('', '_blank');
+        if (!printWindow) {
+          throw new Error('Não foi possível abrir a janela de impressão.');
+        }
+
+        printWindow.document.open();
+        printWindow.document.write(html);
+        printWindow.document.close();
+      } catch (error) {
+        setFeedback(reportFeedback, error.message, true);
+      }
+    });
+  });
+}
+
+async function requestHtmlWithFallback(path, options = {}) {
+  const orderedBases = orderedApiBases();
+  let lastNetworkError = null;
+
+  for (const base of orderedBases) {
+    try {
+      const response = await fetch(`${base}${path}`, options);
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || 'Falha ao carregar relatório para impressão.');
+      }
+      const html = await response.text();
+      activeApiBase = base;
+      localStorage.setItem(ACTIVE_API_KEY, base);
+      return html;
+    } catch (error) {
+      if (error instanceof TypeError) {
+        lastNetworkError = error;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  if (lastNetworkError) {
+    throw new Error('Falha de conexão ao buscar relatório para impressão.');
+  }
+
+  throw new Error('Não foi possível carregar o relatório para impressão.');
+}
+
 async function refreshDashboard() {
   const requests = [
     http('/api/leads'),
     http('/api/campaigns'),
     http('/api/reports/summary'),
-    http('/api/client/license')
+    http('/api/client/license'),
+    http('/api/reports/history?limit=20')
   ];
 
   if (isAdmin()) {
@@ -420,13 +604,14 @@ async function refreshDashboard() {
     requests.push(http('/api/admin/plans'));
   }
 
-  const [leads, campaigns, summary, licenseInfo, companies, commercialOverview, customers, adminPlans] = await Promise.all(
+  const [leads, campaigns, summary, licenseInfo, reportsHistory, companies, commercialOverview, customers, adminPlans] = await Promise.all(
     requests
   );
 
   renderLeads(leads.data || []);
   renderCampaigns(campaigns.data || []);
   renderSummary(summary);
+  renderReportsHistory(reportsHistory.data || []);
 
   if (licenseInfo?.license && !isAdmin()) {
     const remaining =
@@ -468,6 +653,9 @@ function showLoginScreen() {
   appScreen.classList.add('hidden');
   appTopbar.classList.add('hidden');
   setRecoveryVisible(false);
+  pendingSaleId = null;
+  paymentBox?.classList.add('hidden');
+  setCheckoutStep(1);
   loadPublicPlans();
 }
 
@@ -651,53 +839,52 @@ paymentMethodSelect?.addEventListener('change', () => {
   if (!isCard) installmentsSelect.value = '1';
 });
 
-trialForm?.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  const formData = new FormData(trialForm);
-
+checkoutNext1?.addEventListener('click', () => {
   try {
-    const { response, body } = await requestWithFallback('/api/public/trial/register', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: formData.get('name')?.toString().trim(),
-        ownerName: formData.get('ownerName')?.toString().trim(),
-        slug: formData.get('slug')?.toString().trim(),
-        adminEmail: formData.get('adminEmail')?.toString().trim(),
-        adminPassword: formData.get('adminPassword')?.toString()
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(body.error || 'Falha ao criar teste grátis.');
-    }
-
-    setFeedback(
-      trialFeedback,
-      `Teste criado. Válido até ${new Date(body.trial.expires_at).toLocaleDateString('pt-BR')} com ${body.trial.leads_limit} leads.`
-    );
-    trialForm.reset();
+    validateStep(1);
+    setCheckoutStep(2);
   } catch (error) {
-    setFeedback(trialFeedback, error.message, true);
+    setFeedback(checkoutFeedback, error.message, true);
   }
 });
 
+checkoutBack2?.addEventListener('click', () => setCheckoutStep(1));
+
+checkoutNext2?.addEventListener('click', () => {
+  try {
+    validateStep(2);
+    setCheckoutStep(3);
+  } catch (error) {
+    setFeedback(checkoutFeedback, error.message, true);
+  }
+});
+
+checkoutBack3?.addEventListener('click', () => setCheckoutStep(2));
+
+checkoutNext3?.addEventListener('click', () => {
+  try {
+    validateStep(3);
+    renderCheckoutReview();
+    setCheckoutStep(4);
+  } catch (error) {
+    setFeedback(checkoutFeedback, error.message, true);
+  }
+});
+
+checkoutBack4?.addEventListener('click', () => setCheckoutStep(3));
+
 checkoutForm?.addEventListener('submit', async (event) => {
   event.preventDefault();
-  const formData = new FormData(checkoutForm);
 
   try {
+    const payload = collectCheckoutData();
+    validateStep(1);
+    validateStep(2);
+    validateStep(3);
+
     const { response, body } = await requestWithFallback('/api/public/register-checkout', {
       method: 'POST',
-      body: JSON.stringify({
-        name: formData.get('name')?.toString().trim(),
-        ownerName: formData.get('ownerName')?.toString().trim(),
-        slug: formData.get('slug')?.toString().trim(),
-        adminEmail: formData.get('adminEmail')?.toString().trim(),
-        adminPassword: formData.get('adminPassword')?.toString(),
-        planId: formData.get('planId')?.toString(),
-        paymentMethod: formData.get('paymentMethod')?.toString(),
-        installments: Number(formData.get('installments') || 1)
-      })
+      body: JSON.stringify(payload)
     });
 
     if (!response.ok) {
@@ -741,8 +928,20 @@ confirmPaymentBtn?.addEventListener('click', async () => {
     pendingSaleId = null;
     paymentBox?.classList.add('hidden');
     checkoutForm?.reset();
+    setCheckoutStep(1);
+    await refreshDashboard();
   } catch (error) {
     setFeedback(checkoutFeedback, error.message, true);
+  }
+});
+
+generateReportBtn?.addEventListener('click', async () => {
+  try {
+    await http('/api/reports/generate', { method: 'POST' });
+    setFeedback(reportFeedback, 'Relatório gerado e salvo com sucesso.');
+    await refreshDashboard();
+  } catch (error) {
+    setFeedback(reportFeedback, error.message, true);
   }
 });
 
@@ -874,5 +1073,6 @@ refreshAll.addEventListener('click', async () => {
 
 installmentsSelect && (installmentsSelect.disabled = true);
 enablePasswordVisibilityToggles();
+setCheckoutStep(1);
 loadPublicPlans();
 loadSession();

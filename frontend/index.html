@@ -89,51 +89,81 @@
 
         <article class="card auth-card">
           <h2>Cadastre-se e compre o plano</h2>
-          <p class="small-muted">Cadastro completo até o pagamento para ativação da licença.</p>
-
-          <section class="auth-section">
-            <h3>Teste grátis (poucos dias e poucos leads)</h3>
-            <form id="trialForm" class="form">
-              <input name="name" placeholder="Nome da empresa" required />
-              <input name="ownerName" placeholder="Responsável" required />
-              <input name="slug" placeholder="Slug da empresa" required />
-              <input name="adminEmail" type="email" placeholder="E-mail de acesso" required />
-              <input name="adminPassword" type="password" placeholder="Senha de acesso" required />
-              <button class="btn" type="submit">Criar conta de teste</button>
-            </form>
-            <p id="trialFeedback" class="feedback"></p>
-          </section>
+          <p class="small-muted">Use a credencial de teste pronta ao lado, ou conclua o checkout completo em etapas.</p>
 
           <section class="auth-section">
             <h3>Comprar plano</h3>
+            <div class="checkout-steps" id="checkoutSteps">
+              <span data-step-indicator="1" class="active">1. Dados pessoais</span>
+              <span data-step-indicator="2">2. Endereço</span>
+              <span data-step-indicator="3">3. Pagamento</span>
+              <span data-step-indicator="4">4. Confirmação</span>
+            </div>
+
             <form id="checkoutForm" class="form">
-              <input name="name" placeholder="Nome da empresa" required />
-              <input name="ownerName" placeholder="Responsável" required />
-              <input name="slug" placeholder="Slug da empresa" required />
-              <input name="adminEmail" type="email" placeholder="E-mail de acesso" required />
-              <input name="adminPassword" type="password" placeholder="Senha de acesso" required />
-              <select name="planId" id="planSelect" required>
-                <option value="">Selecione o plano</option>
-              </select>
-              <select name="paymentMethod" id="paymentMethodSelect" required>
-                <option value="">Forma de pagamento</option>
-                <option value="pix">Pix</option>
-                <option value="card">Cartão</option>
-              </select>
-              <select name="installments" id="installmentsSelect">
-                <option value="1">1x</option>
-                <option value="2">2x</option>
-                <option value="3">3x</option>
-                <option value="6">6x</option>
-                <option value="12">12x</option>
-              </select>
-              <button class="btn" type="submit">Cadastrar e ir ao pagamento</button>
+              <div id="checkoutStep1" class="checkout-step" data-step="1">
+                <input name="name" placeholder="Nome da empresa" required />
+                <input name="ownerName" placeholder="Responsável" required />
+                <input name="slug" placeholder="Slug da empresa" required />
+                <input name="adminEmail" type="email" placeholder="E-mail de acesso" required />
+                <input name="adminPassword" type="password" placeholder="Senha de acesso" required />
+                <input name="buyerName" placeholder="Nome do comprador" required />
+                <input name="buyerEmail" type="email" placeholder="E-mail do comprador" required />
+                <input name="buyerPhone" placeholder="Telefone do comprador" required />
+                <input name="buyerDocument" placeholder="CPF/CNPJ do comprador" required />
+                <button id="checkoutNext1" class="btn" type="button">Continuar para endereço</button>
+              </div>
+
+              <div id="checkoutStep2" class="checkout-step hidden" data-step="2">
+                <input name="addressStreet" placeholder="Rua / Avenida" required />
+                <input name="addressNumber" placeholder="Número" required />
+                <input name="addressComplement" placeholder="Complemento" />
+                <input name="addressDistrict" placeholder="Bairro" required />
+                <input name="addressCity" placeholder="Cidade" value="Curimatá" required />
+                <input name="addressState" placeholder="UF" value="PI" required />
+                <input name="addressZipCode" placeholder="CEP" required />
+                <div class="inline-actions">
+                  <button id="checkoutBack2" class="btn secondary" type="button">Voltar</button>
+                  <button id="checkoutNext2" class="btn" type="button">Continuar para pagamento</button>
+                </div>
+              </div>
+
+              <div id="checkoutStep3" class="checkout-step hidden" data-step="3">
+                <select name="planId" id="planSelect" required>
+                  <option value="">Selecione o plano</option>
+                </select>
+                <select name="paymentMethod" id="paymentMethodSelect" required>
+                  <option value="">Forma de pagamento</option>
+                  <option value="pix">Pix</option>
+                  <option value="card">Cartão</option>
+                </select>
+                <select name="installments" id="installmentsSelect">
+                  <option value="1">1x</option>
+                  <option value="2">2x</option>
+                  <option value="3">3x</option>
+                  <option value="6">6x</option>
+                  <option value="12">12x</option>
+                </select>
+                <div class="inline-actions">
+                  <button id="checkoutBack3" class="btn secondary" type="button">Voltar</button>
+                  <button id="checkoutNext3" class="btn" type="button">Revisar confirmação</button>
+                </div>
+              </div>
+
+              <div id="checkoutStep4" class="checkout-step hidden" data-step="4">
+                <p class="small-muted">Confirme os dados para gerar o pedido e fatura (ISS Curimatá-PI) após pagamento.</p>
+                <pre id="checkoutReview" class="checkout-review"></pre>
+                <div class="inline-actions">
+                  <button id="checkoutBack4" class="btn secondary" type="button">Voltar</button>
+                  <button class="btn" type="submit">Gerar pedido de pagamento</button>
+                </div>
+              </div>
             </form>
 
             <div id="paymentBox" class="hidden payment-box">
               <h4>Finalizar pagamento</h4>
               <p id="paymentInfo"></p>
-              <button id="confirmPaymentBtn" class="btn" type="button">Confirmar pagamento (MVP)</button>
+              <button id="confirmPaymentBtn" class="btn" type="button">Confirmar pagamento e emitir fatura</button>
             </div>
             <p id="checkoutFeedback" class="feedback"></p>
           </section>
@@ -297,6 +327,33 @@
         <article class="card metric highlight">
           <h3>Taxa Atendimento</h3>
           <strong id="metricRate">0%</strong>
+        </article>
+      </section>
+
+      <section class="grid" id="reportsSection">
+        <article class="card">
+          <div class="section-header">
+            <h2>Relatórios salvos e impressão</h2>
+            <button id="generateReportBtn" class="btn secondary" type="button">Gerar relatório agora</button>
+          </div>
+          <p class="small-muted">Os relatórios ficam registrados para histórico, acompanhamento e impressão futura.</p>
+          <p id="reportFeedback" class="feedback"></p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Leads</th>
+                  <th>Mensagens</th>
+                  <th>Taxa resp.</th>
+                  <th>Faturamento</th>
+                  <th>Ação</th>
+                </tr>
+              </thead>
+              <tbody id="reportsTable"></tbody>
+            </table>
+          </div>
+          <small id="reportsCount">0 registros</small>
         </article>
       </section>
 

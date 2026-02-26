@@ -45,6 +45,10 @@ function loadDb() {
       plans: [],
       licenses: [],
       sales: [],
+      invoices: [],
+      notificationLogs: [],
+      dispatchBatches: [],
+      reportSnapshots: [],
       leads: [],
       campaigns: [],
       messageLogs: []
@@ -64,6 +68,10 @@ function loadDb() {
   if (!Array.isArray(parsed.plans)) parsed.plans = [];
   if (!Array.isArray(parsed.licenses)) parsed.licenses = [];
   if (!Array.isArray(parsed.sales)) parsed.sales = [];
+  if (!Array.isArray(parsed.invoices)) parsed.invoices = [];
+  if (!Array.isArray(parsed.notificationLogs)) parsed.notificationLogs = [];
+  if (!Array.isArray(parsed.dispatchBatches)) parsed.dispatchBatches = [];
+  if (!Array.isArray(parsed.reportSnapshots)) parsed.reportSnapshots = [];
   if (!Array.isArray(parsed.leads)) parsed.leads = [];
   if (!Array.isArray(parsed.campaigns)) parsed.campaigns = [];
   if (!Array.isArray(parsed.messageLogs)) parsed.messageLogs = [];
@@ -257,6 +265,242 @@ function hashToken(token) {
 
 function normalizeEmail(value) {
   return String(value || '').toLowerCase().trim();
+}
+
+function normalizeDigits(value) {
+  return String(value || '').replace(/\D+/g, '');
+}
+
+function sanitizeText(value) {
+  return String(value || '').trim();
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatDateTimeBR(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toLocaleString('pt-BR');
+}
+
+function toMoneyBRL(value) {
+  return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function generateInvoiceNumber() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  const serial = crypto.randomBytes(3).toString('hex').toUpperCase();
+  return `NFS-${y}${m}${d}-${serial}`;
+}
+
+async function logEmailNotification(db, payload) {
+  const now = new Date().toISOString();
+  const mode = process.env.EMAIL_DELIVERY_MODE || 'log_only';
+  let status = 'logged';
+  let providerResponse = null;
+
+  if (mode === 'webhook' && process.env.EMAIL_WEBHOOK_URL) {
+    try {
+      const response = await fetch(process.env.EMAIL_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      status = response.ok ? 'sent' : 'provider_error';
+      providerResponse = { status: response.status };
+    } catch (error) {
+      status = 'provider_error';
+      providerResponse = { error: error.message };
+    }
+  }
+
+  const entry = {
+    id: uuidv4(),
+    to: payload.to,
+    subject: payload.subject,
+    body: payload.body,
+    company_id: payload.company_id || null,
+    sale_id: payload.sale_id || null,
+    invoice_id: payload.invoice_id || null,
+    status,
+    mode,
+    provider_response: providerResponse,
+    created_at: now
+  };
+
+  db.notificationLogs.push(entry);
+  return entry;
+}
+
+function buildReportSnapshot(db, companyId) {
+  const company = db.companies.find((item) => item.id === companyId) || null;
+  const leads = db.leads.filter((item) => item.company_id === companyId);
+  const campaigns = db.campaigns.filter((item) => item.company_id === companyId);
+  const messageLogs = db.messageLogs.filter((item) => item.company_id === companyId);
+  const sales = db.sales.filter((item) => item.company_id === companyId).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const notifications = db.notificationLogs
+    .filter((item) => item.company_id === companyId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const invoices = db.invoices.filter((item) => item.company_id === companyId).sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const dispatchBatches = db.dispatchBatches
+    .filter((item) => item.company_id === companyId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const activeLicense = getActiveLicense(db, companyId);
+
+  const totalMessages = messageLogs.length;
+  const totalSent = messageLogs.filter((item) => item.send_status === 'sent').length;
+  const totalDelivered = messageLogs.filter((item) => item.delivery_status === 'delivered').length;
+  const totalResponded = messageLogs.filter((item) => item.engagement_status === 'responded').length;
+  const responseRate = totalDelivered ? Number(((totalResponded / totalDelivered) * 100).toFixed(2)) : 0;
+
+  const campaignRows = campaigns
+    .map((campaign) => {
+      const logs = messageLogs.filter((log) => log.campaign_id === campaign.id);
+      return {
+        campaign_id: campaign.id,
+        name: campaign.name,
+        channel: campaign.channel,
+        niche: campaign.niche,
+        total_messages: logs.length,
+        delivered: logs.filter((log) => log.delivery_status === 'delivered').length,
+        responded: logs.filter((log) => log.engagement_status === 'responded').length
+      };
+    })
+    .sort((a, b) => b.total_messages - a.total_messages);
+
+  return {
+    company,
+    generated_at: new Date().toISOString(),
+    summary: {
+      total_leads: leads.length,
+      total_campaigns: campaigns.length,
+      total_messages: totalMessages,
+      total_sent: totalSent,
+      total_delivered: totalDelivered,
+      total_responded: totalResponded,
+      response_rate: responseRate,
+      paid_sales: sales.filter((item) => item.status === 'paid').length,
+      pending_sales: sales.filter((item) => item.status === 'pending').length,
+      total_revenue_brl: Number(
+        sales
+          .filter((item) => item.status === 'paid')
+          .reduce((sum, sale) => sum + Number(sale.amount_brl || 0), 0)
+          .toFixed(2)
+      )
+    },
+    active_license: activeLicense,
+    campaigns: campaignRows,
+    dispatch_batches: dispatchBatches.slice(0, 30),
+    sales: sales.slice(0, 20),
+    notifications: notifications.slice(0, 20),
+    invoices: invoices.slice(0, 20)
+  };
+}
+
+function buildPrintableHtml(snapshot) {
+  const companyName = snapshot.company?.name || 'Empresa';
+  const generatedAt = formatDateTimeBR(snapshot.generated_at);
+
+  const campaignRows = snapshot.campaigns
+    .map(
+      (item) => `
+      <tr>
+        <td>${escapeHtml(item.name)}</td>
+        <td>${escapeHtml(item.channel)}</td>
+        <td>${escapeHtml(item.niche)}</td>
+        <td>${item.total_messages}</td>
+        <td>${item.delivered}</td>
+        <td>${item.responded}</td>
+      </tr>`
+    )
+    .join('');
+
+  const salesRows = snapshot.sales
+    .map(
+      (sale) => `
+      <tr>
+        <td>${formatDateTimeBR(sale.created_at)}</td>
+        <td>${escapeHtml(sale.status)}</td>
+        <td>${toMoneyBRL(sale.amount_brl)}</td>
+        <td>${escapeHtml(sale.payment_method)}</td>
+      </tr>`
+    )
+    .join('');
+
+  const invoiceRows = snapshot.invoices
+    .map(
+      (invoice) => `
+      <tr>
+        <td>${escapeHtml(invoice.number)}</td>
+        <td>${formatDateTimeBR(invoice.issued_at)}</td>
+        <td>${toMoneyBRL(invoice.amount_brl)}</td>
+        <td>${escapeHtml(invoice.municipality)}</td>
+      </tr>`
+    )
+    .join('');
+
+  return `<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Relatório LFN - ${escapeHtml(companyName)}</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; color: #222; }
+    h1, h2 { margin: 0 0 8px; }
+    .meta { margin-bottom: 12px; color: #555; }
+    .cards { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: 8px; margin: 12px 0 16px; }
+    .card { border: 1px solid #ddd; padding: 10px; border-radius: 8px; }
+    .label { font-size: 12px; color: #666; }
+    .value { font-size: 18px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { border: 1px solid #ddd; padding: 6px; font-size: 12px; text-align: left; }
+    th { background: #f5f5f5; }
+    @media print { .no-print { display: none; } body { margin: 8mm; } }
+  </style>
+</head>
+<body>
+  <button class="no-print" onclick="window.print()">Imprimir</button>
+  <h1>Relatório de Acompanhamento - LeadFlow Nexus Pro</h1>
+  <div class="meta">Empresa: ${escapeHtml(companyName)} | Gerado em: ${generatedAt}</div>
+
+  <div class="cards">
+    <div class="card"><div class="label">Leads</div><div class="value">${snapshot.summary.total_leads}</div></div>
+    <div class="card"><div class="label">Campanhas</div><div class="value">${snapshot.summary.total_campaigns}</div></div>
+    <div class="card"><div class="label">Mensagens</div><div class="value">${snapshot.summary.total_messages}</div></div>
+    <div class="card"><div class="label">Taxa resposta</div><div class="value">${snapshot.summary.response_rate}%</div></div>
+  </div>
+
+  <h2>Campanhas e envios</h2>
+  <table>
+    <thead><tr><th>Campanha</th><th>Canal</th><th>Nicho</th><th>Mensagens</th><th>Entregues</th><th>Respondidas</th></tr></thead>
+    <tbody>${campaignRows || '<tr><td colspan="6">Sem dados.</td></tr>'}</tbody>
+  </table>
+
+  <h2>Vendas</h2>
+  <table>
+    <thead><tr><th>Data</th><th>Status</th><th>Valor</th><th>Pagamento</th></tr></thead>
+    <tbody>${salesRows || '<tr><td colspan="4">Sem dados.</td></tr>'}</tbody>
+  </table>
+
+  <h2>Faturas emitidas</h2>
+  <table>
+    <thead><tr><th>Número</th><th>Emissão</th><th>Valor</th><th>Município</th></tr></thead>
+    <tbody>${invoiceRows || '<tr><td colspan="4">Sem dados.</td></tr>'}</tbody>
+  </table>
+</body>
+</html>`;
 }
 
 function passwordMeetsPolicy(password) {
@@ -658,7 +902,18 @@ app.post('/api/public/register-checkout', (req, res) => {
     adminPassword,
     planId,
     paymentMethod,
-    installments
+    installments,
+    buyerName,
+    buyerEmail,
+    buyerPhone,
+    buyerDocument,
+    addressStreet,
+    addressNumber,
+    addressComplement,
+    addressDistrict,
+    addressCity,
+    addressState,
+    addressZipCode
   } = req.body;
 
   if (!name || !ownerName || !slug || !adminEmail || !adminPassword || !planId || !paymentMethod) {
@@ -726,6 +981,21 @@ app.post('/api/public/register-checkout', (req, res) => {
     amount_brl: totalAmount,
     payment_method: String(paymentMethod),
     installments: paymentMethod === 'card' ? Math.max(1, Number(installments || 1)) : 1,
+    buyer: {
+      name: sanitizeText(buyerName || ownerName || name),
+      email: normalizeEmail(buyerEmail || adminEmail),
+      phone: sanitizeText(buyerPhone || ''),
+      document: normalizeDigits(buyerDocument || '')
+    },
+    billing_address: {
+      street: sanitizeText(addressStreet || ''),
+      number: sanitizeText(addressNumber || ''),
+      complement: sanitizeText(addressComplement || ''),
+      district: sanitizeText(addressDistrict || ''),
+      city: sanitizeText(addressCity || 'Curimatá'),
+      state: sanitizeText(addressState || 'PI').toUpperCase(),
+      zip_code: normalizeDigits(addressZipCode || '')
+    },
     status: 'pending',
     paid_at: null,
     created_at: nowIso
@@ -759,7 +1029,7 @@ app.post('/api/public/register-checkout', (req, res) => {
   });
 });
 
-app.post('/api/public/checkout/:saleId/confirm', (req, res) => {
+app.post('/api/public/checkout/:saleId/confirm', async (req, res) => {
   const db = loadDb();
   const sale = db.sales.find((item) => item.id === req.params.saleId);
   if (!sale) {
@@ -781,6 +1051,26 @@ app.post('/api/public/checkout/:saleId/confirm', (req, res) => {
 
   sale.status = 'paid';
   sale.paid_at = nowIso;
+
+  const invoiceId = uuidv4();
+  const invoiceNumber = generateInvoiceNumber();
+  const invoice = {
+    id: invoiceId,
+    number: invoiceNumber,
+    sale_id: sale.id,
+    company_id: sale.company_id,
+    amount_brl: Number(sale.amount_brl || 0),
+    municipality: 'Curimatá-PI',
+    tax_type: 'ISS',
+    issued_at: nowIso,
+    buyer: sale.buyer || null,
+    billing_address: sale.billing_address || null,
+    created_at: nowIso
+  };
+
+  db.invoices.push(invoice);
+  sale.invoice_id = invoiceId;
+  sale.invoice_number = invoiceNumber;
 
   db.licenses = db.licenses.map((license) => {
     if (license.company_id === sale.company_id && (license.status === 'active' || license.status === 'trial')) {
@@ -805,7 +1095,37 @@ app.post('/api/public/checkout/:saleId/confirm', (req, res) => {
     event_type: 'checkout_paid',
     status: 'success',
     company_id: sale.company_id,
-    details: { sale_id: sale.id, amount_brl: sale.amount_brl, payment_method: sale.payment_method }
+    details: {
+      sale_id: sale.id,
+      amount_brl: sale.amount_brl,
+      payment_method: sale.payment_method,
+      invoice_number: invoiceNumber
+    }
+  });
+
+  const company = db.companies.find((item) => item.id === sale.company_id);
+  const companyUser = db.users.find((item) => item.company_id === sale.company_id && item.role === 'client');
+  const sellerEmail = process.env.ADMIN_EMAIL || 'wanderpsc@gmail.com';
+  const buyerEmail = sale.buyer?.email || companyUser?.email || null;
+
+  if (buyerEmail) {
+    await logEmailNotification(db, {
+      to: buyerEmail,
+      subject: `Pagamento confirmado - ${company?.name || 'LFN'}`,
+      body: `Pagamento confirmado. Fatura ${invoiceNumber} emitida com ISS Curimatá-PI.`,
+      company_id: sale.company_id,
+      sale_id: sale.id,
+      invoice_id: invoiceId
+    });
+  }
+
+  await logEmailNotification(db, {
+    to: sellerEmail,
+    subject: `Nova venda confirmada - ${company?.name || 'Cliente'}`,
+    body: `Venda ${sale.id} confirmada. Fatura ${invoiceNumber}. Valor ${toMoneyBRL(sale.amount_brl)}.`,
+    company_id: sale.company_id,
+    sale_id: sale.id,
+    invoice_id: invoiceId
   });
 
   saveDb(db);
@@ -818,8 +1138,115 @@ app.post('/api/public/checkout/:saleId/confirm', (req, res) => {
       status: 'active',
       expires_at: expiresAt,
       leads_limit: plan.leads_limit
+    },
+    invoice: {
+      id: invoiceId,
+      number: invoiceNumber,
+      municipality: 'Curimatá-PI',
+      tax_type: 'ISS'
     }
   });
+});
+
+app.post('/api/reports/generate', requireAuth, (req, res) => {
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) {
+    return res.status(404).json({ error: 'Empresa não encontrada para gerar relatório.' });
+  }
+
+  const snapshot = buildReportSnapshot(db, companyId);
+  const report = {
+    id: uuidv4(),
+    company_id: companyId,
+    created_by: req.auth.user.id,
+    created_at: new Date().toISOString(),
+    data: snapshot
+  };
+
+  db.reportSnapshots.push(report);
+  appendSecurityAudit(db, req, {
+    event_type: 'report_generated',
+    status: 'success',
+    actor_user_id: req.auth.user.id,
+    actor_email: req.auth.user.email,
+    company_id: companyId,
+    details: {
+      report_id: report.id,
+      total_messages: snapshot.summary.total_messages,
+      total_leads: snapshot.summary.total_leads
+    }
+  });
+  saveDb(db);
+
+  return res.status(201).json({
+    message: 'Relatório salvo com sucesso.',
+    report: {
+      id: report.id,
+      created_at: report.created_at,
+      summary: snapshot.summary
+    }
+  });
+});
+
+app.get('/api/reports/history', requireAuth, (req, res) => {
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) {
+    return res.status(404).json({ error: 'Empresa não encontrada para consulta.' });
+  }
+
+  const limitValue = Number(req.query.limit || 30);
+  const limit = Number.isFinite(limitValue) ? Math.min(Math.max(limitValue, 1), 200) : 30;
+
+  const rows = db.reportSnapshots
+    .filter((item) => item.company_id === companyId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, limit)
+    .map((item) => ({
+      id: item.id,
+      company_id: item.company_id,
+      created_at: item.created_at,
+      created_by: item.created_by,
+      summary: item.data?.summary || null
+    }));
+
+  return res.json({ total: rows.length, data: rows });
+});
+
+app.get('/api/reports/dispatch-history', requireAuth, (req, res) => {
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) {
+    return res.status(404).json({ error: 'Empresa não encontrada para consulta.' });
+  }
+
+  const limitValue = Number(req.query.limit || 50);
+  const limit = Number.isFinite(limitValue) ? Math.min(Math.max(limitValue, 1), 300) : 50;
+
+  const data = db.dispatchBatches
+    .filter((item) => item.company_id === companyId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, limit);
+
+  return res.json({ total: data.length, data });
+});
+
+app.get('/api/reports/:id/print', requireAuth, (req, res) => {
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) {
+    return res.status(404).json({ error: 'Empresa não encontrada para impressão.' });
+  }
+
+  const report = db.reportSnapshots.find((item) => item.id === req.params.id && item.company_id === companyId);
+  if (!report) {
+    return res.status(404).json({ error: 'Relatório não encontrado.' });
+  }
+
+  const html = buildPrintableHtml(report.data || {});
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  return res.send(html);
 });
 
 app.post('/api/auth/login', (req, res) => {
@@ -1496,8 +1923,15 @@ app.post('/api/campaigns/:id/send', requireAuth, (req, res) => {
   }
 
   const now = new Date().toISOString();
+  const batchId = uuidv4();
+  const byStatus = { sent: 0, delivered: 0, responded: 0, failed: 0 };
   leads.forEach((lead) => {
     const status = randomStatus();
+    byStatus.sent += status.sendStatus === 'sent' ? 1 : 0;
+    byStatus.delivered += status.deliveryStatus === 'delivered' ? 1 : 0;
+    byStatus.responded += status.engagementStatus === 'responded' ? 1 : 0;
+    byStatus.failed += status.deliveryStatus === 'failed' ? 1 : 0;
+
     db.messageLogs.push({
       id: uuidv4(),
       company_id: companyId,
@@ -1510,12 +1944,24 @@ app.post('/api/campaigns/:id/send', requireAuth, (req, res) => {
       created_at: now
     });
   });
+
+  db.dispatchBatches.push({
+    id: batchId,
+    company_id: companyId,
+    campaign_id: campaign.id,
+    total_leads: leads.length,
+    totals: byStatus,
+    created_by: req.auth.user.id,
+    created_at: now
+  });
+
   saveDb(db);
 
   return res.json({
     message: 'Disparo processado com sucesso (simulação de MVP).',
     campaignId,
-    leadsProcessed: leads.length
+    leadsProcessed: leads.length,
+    batchId
   });
 });
 
