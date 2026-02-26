@@ -2,7 +2,7 @@ services:
   - type: web
     name: lfn-backend
     runtime: docker
-    repo: https://github.com/SEU-USUARIO/SEU-REPO
+    repo: https://github.com/Wanderpsc/lpl-leadflow-pro.git
     rootDir: backend
     dockerContext: ./backend
     plan: free
