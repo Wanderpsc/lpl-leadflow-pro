@@ -1,0 +1,38 @@
+name: Deploy Frontend to Surge
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/deploy-frontend-surge.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Write production config
+        run: |
+          echo "window.LFN_API_BASES = ['${{ secrets.FRONTEND_API_BASE }}'];" > dist/config.js
+          echo "window.LFN_API_BASE = window.LFN_API_BASES[0];" >> dist/config.js
+
+      - name: Install Surge
+        run: npm install -g surge
+
+      - name: Deploy to Surge
+        run: surge ./dist ${{ secrets.SURGE_DOMAIN }} --token ${{ secrets.SURGE_TOKEN }}

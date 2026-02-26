@@ -1,0 +1,25 @@
+{
+  "name": "lpl-leadflow-backend",
+  "version": "1.0.0",
+  "description": "LeadFlow Nexus Pro backend API",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "keywords": [
+    "lead",
+    "marketing",
+    "whatsapp",
+    "analytics"
+  ],
+  "author": "Wander Pires Silva Coelho",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "helmet": "^8.1.0",
+    "morgan": "^1.10.0",
+    "uuid": "^11.1.0"
+  }
+}

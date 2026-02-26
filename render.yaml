@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: lfn-backend
+    runtime: docker
+    repo: https://github.com/SEU-USUARIO/SEU-REPO
+    rootDir: backend
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_FILE_PATH
+        value: /data/data.json
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+    disk:
+      name: lfn-data
+      mountPath: /data
+      sizeGB: 1

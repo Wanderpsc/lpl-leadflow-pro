@@ -1,0 +1,25 @@
+name: Deploy Backend to Render
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "backend/**"
+      - "render.yaml"
+      - ".github/workflows/deploy-backend-render.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render Deploy Hook
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK" ]; then
+            echo "Secret RENDER_DEPLOY_HOOK não configurado." >&2
+            exit 1
+          fi
+          curl -fsS -X POST "$RENDER_DEPLOY_HOOK"
+          echo "Deploy do backend disparado no Render."

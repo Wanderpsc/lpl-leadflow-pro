@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LFN Dashboard - LeadFlow Nexus Pro</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <section id="authScreen" class="auth-screen">
+      <div class="auth-grid">
+        <article class="card auth-card">
+          <h1>LeadFlow Nexus Pro <span>LFN</span></h1>
+          <p>Plataforma de venda e gestão de leads para clientes finais, revenda e operação comercial.</p>
+
+          <section class="auth-section">
+            <h3>Assistir funcionamento</h3>
+            <div class="video-wrap">
+              <iframe
+                src="https://www.youtube.com/embed/dQw4w9WgXcQ"
+                title="Demonstração LeadFlow Nexus Pro"
+                loading="lazy"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowfullscreen
+              ></iframe>
+            </div>
+          </section>
+
+          <section class="auth-section">
+            <h3>Credencial de teste rápido</h3>
+            <p class="small-muted">Acesso de demonstração com poucos dias e limite reduzido de leads.</p>
+            <div class="demo-credentials">
+              <span>E-mail: demo@leadflownexuspro.com</span>
+              <span>Senha: Demo@123</span>
+            </div>
+            <button id="fillDemoBtn" class="btn secondary full-width" type="button">Usar credencial de teste</button>
+          </section>
+
+          <section class="auth-section">
+            <h3>Entrar (quem já comprou)</h3>
+            <form id="loginForm" class="form">
+              <input name="email" type="email" placeholder="E-mail" required />
+              <input name="password" type="password" placeholder="Senha" required />
+              <button class="btn">Entrar</button>
+            </form>
+            <button id="showRecoveryBtn" class="btn secondary full-width" type="button">Esqueci minha senha</button>
+            <p id="loginFeedback" class="feedback"></p>
+          </section>
+
+          <section id="firstAccessSection" class="hidden auth-section">
+            <h3>Primeiro acesso: troque sua senha</h3>
+            <form id="firstAccessForm" class="form">
+              <input name="email" type="email" placeholder="E-mail" required />
+              <input name="changeToken" placeholder="Token de primeiro acesso" required />
+              <input name="newPassword" type="password" placeholder="Nova senha" required />
+              <button class="btn" type="submit">Alterar senha inicial</button>
+            </form>
+            <p id="firstAccessFeedback" class="feedback"></p>
+          </section>
+
+          <section id="recoverySection" class="hidden auth-section">
+            <h3>Recuperação de senha</h3>
+            <form id="forgotForm" class="form">
+              <input name="email" type="email" placeholder="E-mail" required />
+              <button class="btn" type="submit">Gerar token de recuperação</button>
+            </form>
+
+            <form id="resetForm" class="form">
+              <input name="email" type="email" placeholder="E-mail" required />
+              <input name="resetToken" placeholder="Token de recuperação" required />
+              <input name="newPassword" type="password" placeholder="Nova senha" required />
+              <button class="btn" type="submit">Redefinir senha</button>
+            </form>
+
+            <button id="hideRecoveryBtn" class="btn secondary full-width" type="button">Voltar ao login</button>
+            <p id="recoveryFeedback" class="feedback"></p>
+          </section>
+
+          <small class="hint">Credencial criador/vendedor: admin@leadflownexuspro.com</small>
+        </article>
+
+        <article class="card auth-card">
+          <h2>Cadastre-se e compre o plano</h2>
+          <p class="small-muted">Cadastro completo até o pagamento para ativação da licença.</p>
+
+          <section class="auth-section">
+            <h3>Teste grátis (poucos dias e poucos leads)</h3>
+            <form id="trialForm" class="form">
+              <input name="name" placeholder="Nome da empresa" required />
+              <input name="ownerName" placeholder="Responsável" required />
+              <input name="slug" placeholder="Slug da empresa" required />
+              <input name="adminEmail" type="email" placeholder="E-mail de acesso" required />
+              <input name="adminPassword" type="password" placeholder="Senha de acesso" required />
+              <button class="btn" type="submit">Criar conta de teste</button>
+            </form>
+            <p id="trialFeedback" class="feedback"></p>
+          </section>
+
+          <section class="auth-section">
+            <h3>Comprar plano</h3>
+            <form id="checkoutForm" class="form">
+              <input name="name" placeholder="Nome da empresa" required />
+              <input name="ownerName" placeholder="Responsável" required />
+              <input name="slug" placeholder="Slug da empresa" required />
+              <input name="adminEmail" type="email" placeholder="E-mail de acesso" required />
+              <input name="adminPassword" type="password" placeholder="Senha de acesso" required />
+              <select name="planId" id="planSelect" required>
+                <option value="">Selecione o plano</option>
+              </select>
+              <select name="paymentMethod" id="paymentMethodSelect" required>
+                <option value="">Forma de pagamento</option>
+                <option value="pix">Pix</option>
+                <option value="card">Cartão</option>
+              </select>
+              <select name="installments" id="installmentsSelect">
+                <option value="1">1x</option>
+                <option value="2">2x</option>
+                <option value="3">3x</option>
+                <option value="6">6x</option>
+                <option value="12">12x</option>
+              </select>
+              <button class="btn" type="submit">Cadastrar e ir ao pagamento</button>
+            </form>
+
+            <div id="paymentBox" class="hidden payment-box">
+              <h4>Finalizar pagamento</h4>
+              <p id="paymentInfo"></p>
+              <button id="confirmPaymentBtn" class="btn" type="button">Confirmar pagamento (MVP)</button>
+            </div>
+            <p id="checkoutFeedback" class="feedback"></p>
+          </section>
+        </article>
+      </div>
+    </section>
+
+    <header class="topbar hidden" id="appTopbar">
+      <div>
+        <h1>LeadFlow Nexus Pro <span>LFN</span></h1>
+        <p id="sessionInfo">Painel Administrativo</p>
+      </div>
+      <div class="topbar-actions">
+        <button id="refreshAll" class="btn secondary">Atualizar dados</button>
+        <button id="logoutBtn" class="btn secondary">Sair</button>
+      </div>
+    </header>
+
+    <main class="container hidden" id="appScreen">
+      <section class="grid cards hidden" id="commercialCards">
+        <article class="card metric">
+          <h3>Clientes compradores</h3>
+          <strong id="metricCustomers">0</strong>
+        </article>
+        <article class="card metric">
+          <h3>Licenças ativas</h3>
+          <strong id="metricActiveLicenses">0</strong>
+        </article>
+        <article class="card metric">
+          <h3>Vendas pagas</h3>
+          <strong id="metricPaidSales">0</strong>
+        </article>
+        <article class="card metric highlight">
+          <h3>Faturamento</h3>
+          <strong id="metricRevenue">R$ 0</strong>
+        </article>
+      </section>
+
+      <section class="grid two-cols hidden" id="companiesSection">
+        <article class="card">
+          <h2>Revenda • Criar Cliente</h2>
+          <form id="companyForm" class="form">
+            <input name="name" placeholder="Nome da empresa cliente" required />
+            <input name="ownerName" placeholder="Responsável" required />
+            <input name="slug" placeholder="Slug (ex: clinica-viva)" required />
+            <input name="adminEmail" type="email" placeholder="E-mail login do cliente" required />
+            <input name="adminPassword" type="password" placeholder="Senha inicial do cliente" required />
+            <button class="btn">Criar cliente</button>
+          </form>
+          <p id="companyFeedback" class="feedback"></p>
+        </article>
+
+        <article class="card">
+          <div class="section-header">
+            <h2>Empresas Clientes</h2>
+            <small id="companiesCount">0 registros</small>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Empresa</th>
+                  <th>Responsável</th>
+                  <th>Slug</th>
+                </tr>
+              </thead>
+              <tbody id="companiesTable"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid hidden" id="customersSection">
+        <article class="card">
+          <div class="section-header">
+            <h2>Clientes, Planos e Licenças</h2>
+            <small id="customersCount">0 registros</small>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Empresa</th>
+                  <th>Login</th>
+                  <th>Plano</th>
+                  <th>Licença</th>
+                  <th>Leads</th>
+                  <th>Última venda</th>
+                </tr>
+              </thead>
+              <tbody id="customersTable"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid two-cols hidden" id="plansSection">
+        <article class="card">
+          <h2>Admin • Criar Plano</h2>
+          <form id="adminPlanForm" class="form">
+            <input name="name" placeholder="Nome do plano" required />
+            <input name="code" placeholder="Código (ex: premium)" required />
+            <input name="price_brl" type="number" min="0" step="0.01" placeholder="Preço (BRL)" required />
+            <select name="billing_cycle" required>
+              <option value="monthly">Mensal</option>
+              <option value="yearly">Anual</option>
+              <option value="trial">Trial</option>
+            </select>
+            <input name="leads_limit" type="number" min="0" placeholder="Limite de leads (vazio = ilimitado)" />
+            <input name="duration_days" type="number" min="1" value="30" placeholder="Duração em dias" required />
+            <label class="checkbox-row">
+              <input name="active" type="checkbox" checked />
+              Plano ativo
+            </label>
+            <button class="btn" type="submit">Criar plano</button>
+          </form>
+          <p id="planFeedback" class="feedback"></p>
+        </article>
+
+        <article class="card">
+          <div class="section-header">
+            <h2>Planos Cadastrados</h2>
+            <small id="plansCount">0 registros</small>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Plano</th>
+                  <th>Código</th>
+                  <th>Preço</th>
+                  <th>Leads</th>
+                  <th>Duração</th>
+                  <th>Status</th>
+                  <th>Ação</th>
+                </tr>
+              </thead>
+              <tbody id="plansTable"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid cards" id="metricsCards">
+        <article class="card metric">
+          <h3>Mensagens</h3>
+          <strong id="metricMessages">0</strong>
+        </article>
+        <article class="card metric">
+          <h3>Enviadas</h3>
+          <strong id="metricSent">0</strong>
+        </article>
+        <article class="card metric">
+          <h3>Entregues</h3>
+          <strong id="metricDelivered">0</strong>
+        </article>
+        <article class="card metric">
+          <h3>Respondidas</h3>
+          <strong id="metricResponded">0</strong>
+        </article>
+        <article class="card metric highlight">
+          <h3>Taxa Atendimento</h3>
+          <strong id="metricRate">0%</strong>
+        </article>
+      </section>
+
+      <section class="grid two-cols">
+        <article class="card">
+          <h2>Cadastrar Lead (Opt-in)</h2>
+          <form id="leadForm" class="form">
+            <input name="fullName" placeholder="Nome completo" required />
+            <input name="email" placeholder="E-mail" type="email" />
+            <input name="phone" placeholder="Telefone/WhatsApp" />
+            <input name="niche" placeholder="Nicho (ex: saúde)" required />
+            <input name="source" placeholder="Origem do consentimento" required />
+            <label class="checkbox-row">
+              <input type="checkbox" name="consent" required />
+              Confirmo que o lead autorizou o contato
+            </label>
+            <button class="btn">Salvar lead</button>
+          </form>
+          <p id="leadFeedback" class="feedback"></p>
+        </article>
+
+        <article class="card">
+          <h2>Criar Campanha</h2>
+          <form id="campaignForm" class="form">
+            <input name="name" placeholder="Nome da campanha" required />
+            <input name="niche" placeholder="Nicho alvo" required />
+            <select name="channel" required>
+              <option value="">Selecione o canal</option>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="instagram">Instagram</option>
+              <option value="facebook">Facebook</option>
+              <option value="email">E-mail</option>
+            </select>
+            <textarea name="messageTemplate" rows="4" placeholder="Template da mensagem" required></textarea>
+            <button class="btn">Criar campanha</button>
+          </form>
+          <p id="campaignFeedback" class="feedback"></p>
+        </article>
+      </section>
+
+      <section class="grid two-cols">
+        <article class="card">
+          <div class="section-header">
+            <h2>Leads Ativos</h2>
+            <small id="leadsCount">0 registros</small>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nome</th>
+                  <th>Nicho</th>
+                  <th>Contato</th>
+                  <th>Origem</th>
+                </tr>
+              </thead>
+              <tbody id="leadsTable"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="card">
+          <div class="section-header">
+            <h2>Campanhas</h2>
+            <small id="campaignsCount">0 registros</small>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nome</th>
+                  <th>Nicho</th>
+                  <th>Canal</th>
+                  <th>Ação</th>
+                </tr>
+              </thead>
+              <tbody id="campaignsTable"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <script src="./config.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
