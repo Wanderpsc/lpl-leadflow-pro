@@ -3,8 +3,8 @@ services:
     name: lfn-backend
     runtime: docker
     repo: https://github.com/Wanderpsc/lpl-leadflow-pro.git
-    rootDir: backend
     dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
     plan: free
     envVars:
       - key: NODE_ENV
