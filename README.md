@@ -9,6 +9,11 @@ Plataforma profissional para gestão de leads **com consentimento (opt-in)**, cr
 - **Proprietário:** Wander Pires Silva Coelho
 - **Direitos:** Todos os direitos reservados ao proprietário.
 
+## Contato comercial
+
+- **E-mail:** wanderpsc@gmail.com
+- **WhatsApp:** +55 (89) 9 8139-8723
+
 ## Domínio sugerido (SEO)
 
 - `leadflownexuspro.com.br`
@@ -217,6 +222,12 @@ Observação: neste MVP o pagamento é simulado (confirmação manual via endpoi
 ## Referência de modelos de planos
 
 - Veja o estudo base em `docs/PRICING_REFERENCE.md`.
+
+## Tutorial de uso para envios
+
+- Guia completo de preenchimento e disparo: `docs/TUTORIAL_ENVIO_MENSAGENS.md`.
+- Manual rápido de 1 página para cliente final: `docs/MANUAL_1_PAGINA_CLIENTE.md`.
+- Versão pronta para impressão/PDF: `docs/MANUAL_1_PAGINA_CLIENTE_PRINT.html`.
 
 ## Sobre erro "Failed to fetch"
 

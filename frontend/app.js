@@ -519,6 +519,18 @@ loginForm.addEventListener('submit', async (event) => {
         return;
       }
 
+      if (result.lockedUntil) {
+        const lockDate = new Date(result.lockedUntil);
+        const lockTime = Number.isNaN(lockDate.getTime())
+          ? null
+          : lockDate.toLocaleString('pt-BR');
+        throw new Error(
+          lockTime
+            ? `Conta temporariamente bloqueada por tentativas excedidas. Tente novamente após ${lockTime}.`
+            : 'Conta temporariamente bloqueada por tentativas excedidas.'
+        );
+      }
+
       throw new Error(result.error || 'Falha no login');
     }
 
