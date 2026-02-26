@@ -330,13 +330,13 @@
         </article>
       </section>
 
-      <section class="grid" id="reportsSection">
+      <section class="grid two-cols" id="reportsSection">
         <article class="card">
           <div class="section-header">
-            <h2>Relatórios salvos e impressão</h2>
-            <button id="generateReportBtn" class="btn secondary" type="button">Gerar relatório agora</button>
+            <h2>Relatórios salvos</h2>
+            <button id="generateReportBtn" class="btn secondary" type="button">Gerar relatório</button>
           </div>
-          <p class="small-muted">Os relatórios ficam registrados para histórico, acompanhamento e impressão futura.</p>
+          <p class="small-muted">Relatórios gerados manualmente para histórico e impressão.</p>
           <p id="reportFeedback" class="feedback"></p>
           <div class="table-wrap">
             <table>
@@ -354,6 +354,29 @@
             </table>
           </div>
           <small id="reportsCount">0 registros</small>
+        </article>
+
+        <article class="card">
+          <div class="section-header">
+            <h2>📤 Histórico de Disparos</h2>
+            <small id="dispatchHistoryCount">0 disparos</small>
+          </div>
+          <p class="small-muted">Registro de cada campanha disparada: enviados, falhas e simulações.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Campanha</th>
+                  <th>Canal</th>
+                  <th>Total</th>
+                  <th>Enviados</th>
+                  <th>Falhas</th>
+                </tr>
+              </thead>
+              <tbody id="dispatchHistoryTable"></tbody>
+            </table>
+          </div>
         </article>
       </section>
 

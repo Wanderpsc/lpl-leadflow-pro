@@ -2106,6 +2106,8 @@ app.post('/api/campaigns/:id/send', requireAuth, async (req, res) => {
     id: batchId,
     company_id: companyId,
     campaign_id: campaign.id,
+    campaign_name: campaign.name,
+    channel: campaign.channel,
     total_leads: leads.length,
     totals: byStatus,
     created_by: req.auth.user.id,
@@ -2116,10 +2118,12 @@ app.post('/api/campaigns/:id/send', requireAuth, async (req, res) => {
 
   return res.json({
     message: canUseRealWhatsApp
-      ? 'Disparo processado com envio real via WhatsApp Cloud API.'
-      : 'Disparo processado com sucesso (simulação de MVP).',
+      ? `Disparo via WhatsApp: ${byStatus.sent} enviados, ${byStatus.failed} falhas.`
+      : `Disparo simulado: ${leads.length} leads processados.`,
     campaignId,
     leadsProcessed: leads.length,
+    sent: byStatus.sent,
+    failed: byStatus.failed,
     dispatchMode: canUseRealWhatsApp ? 'whatsapp_cloud_api' : 'simulation',
     batchId
   });

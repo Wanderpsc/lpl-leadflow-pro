@@ -90,6 +90,8 @@ const generateReportBtn = document.getElementById('generateReportBtn');
 const reportFeedback = document.getElementById('reportFeedback');
 const reportsTable = document.getElementById('reportsTable');
 const reportsCount = document.getElementById('reportsCount');
+const dispatchHistoryTable  = document.getElementById('dispatchHistoryTable');
+const dispatchHistoryCount  = document.getElementById('dispatchHistoryCount');
 
 function setFeedback(element, message, isError = false) {
   if (!element) return;
@@ -446,10 +448,13 @@ dispatchConfirmBtn.addEventListener('click', async () => {
       method: 'POST',
       body: JSON.stringify({ leadIds })
     });
-    setFeedback(dispatchModalFeedback, `Disparo concluído: ${result.leadsProcessed} leads processados.`);
-    setFeedback(campaignFeedback, `Campanha "${_dispatchCampaignName}": ${result.leadsProcessed} leads disparados.`);
+    setFeedback(dispatchModalFeedback, `${result.message}`);
+    const infoMsg = result.failed > 0
+      ? `Campanha "${_dispatchCampaignName}": ${result.sent ?? result.leadsProcessed} enviados${result.failed ? `, ${result.failed} falhas` : ''}.`
+      : `Campanha "${_dispatchCampaignName}": ${result.leadsProcessed} leads disparados.`;
+    setFeedback(campaignFeedback, infoMsg, result.failed > 0 && result.sent === 0);
     await refreshDashboard();
-    setTimeout(closeDispatchModal, 1800);
+    setTimeout(closeDispatchModal, 2500);
   } catch (error) {
     setFeedback(dispatchModalFeedback, error.message, true);
     dispatchConfirmBtn.disabled = false;
@@ -735,6 +740,7 @@ async function refreshDashboard() {
   renderSummary(summary);
   renderReportsHistory(reportsHistory.data || []);
   loadProspects();
+  loadDispatchHistory();
 
   if (licenseInfo?.license && !isAdmin()) {
     const remaining =
@@ -1355,6 +1361,38 @@ prospectLoadMore && prospectLoadMore.addEventListener('click', async () => {
 });
 
 // ===== fim prospecção =====
+
+async function loadDispatchHistory() {
+  if (!dispatchHistoryTable) return;
+  try {
+    const res = await http('/api/reports/dispatch-history?limit=50');
+    const rows = res.data || [];
+    if (dispatchHistoryCount) dispatchHistoryCount.textContent = `${rows.length} disparo${rows.length !== 1 ? 's' : ''}`;
+    if (!rows.length) {
+      dispatchHistoryTable.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted)">Nenhum disparo realizado ainda.</td></tr>';
+      return;
+    }
+    dispatchHistoryTable.innerHTML = rows.map((b) => {
+      const date = new Date(b.created_at);
+      const dateStr = Number.isNaN(date.getTime()) ? '-' : date.toLocaleString('pt-BR');
+      const t = b.totals || {};
+      const sent = t.sent ?? 0;
+      const failed = t.failed ?? 0;
+      const total = b.total_leads ?? 0;
+      const failColor = failed > 0 && sent === 0 ? 'color:var(--danger,#dc2626)' : failed > 0 ? 'color:#d97706' : '';
+      return `<tr>
+        <td>${dateStr}</td>
+        <td>${b.campaign_name || '-'}</td>
+        <td>${b.channel || '-'}</td>
+        <td>${total}</td>
+        <td style="color:var(--success,#16a34a)">${sent}</td>
+        <td style="${failColor}">${failed}</td>
+      </tr>`;
+    }).join('');
+  } catch (_err) {
+    if (dispatchHistoryTable) dispatchHistoryTable.innerHTML = '<tr><td colspan="6">Erro ao carregar histórico.</td></tr>';
+  }
+}
 
 refreshAll.addEventListener('click', async () => {
   try {
