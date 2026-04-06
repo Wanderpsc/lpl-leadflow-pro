@@ -368,10 +368,11 @@
                 <tr>
                   <th>Data</th>
                   <th>Campanha</th>
-                  <th>Canal</th>
+                  <th>Modo</th>
                   <th>Total</th>
                   <th>Enviados</th>
                   <th>Falhas</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody id="dispatchHistoryTable"></tbody>
@@ -439,14 +440,33 @@
           <form id="campaignForm" class="form">
             <input name="name" placeholder="Nome da campanha" required />
             <input name="niche" placeholder="Nicho alvo" required />
-            <select name="channel" required>
+            <select name="channel" id="campaignChannelSelect" required>
               <option value="">Selecione o canal</option>
               <option value="whatsapp">WhatsApp</option>
               <option value="instagram">Instagram</option>
               <option value="facebook">Facebook</option>
               <option value="email">E-mail</option>
             </select>
-            <textarea name="messageTemplate" rows="4" placeholder="Template da mensagem" required></textarea>
+            <textarea name="messageTemplate" rows="4" placeholder="Corpo da mensagem (use {{nome}} para personalizar)" required></textarea>
+
+            <!-- Campos de template WhatsApp: visíveis apenas quando canal = whatsapp -->
+            <div id="whatsappTemplateFields" class="hidden">
+              <p class="hint" style="margin:4px 0 6px">
+                <strong>Template WhatsApp (recomendado para leads de anúncios):</strong>
+                Para enviar a contatos frios você precisa de um template aprovado pela Meta.
+                <a href="https://business.facebook.com/wa/manage/message-templates/" target="_blank" rel="noopener noreferrer">Gerenciar templates</a>
+              </p>
+              <div style="display:flex;gap:8px;align-items:flex-end">
+                <input name="templateName" id="templateNameInput" placeholder="Nome do template (ex: hello_world)" style="flex:1" />
+                <button type="button" id="fetchTemplatesBtn" class="btn secondary btn-sm">Buscar</button>
+              </div>
+              <select id="templatePickerSelect" class="hidden" style="margin-top:6px">
+                <option value="">— Selecione um template —</option>
+              </select>
+              <input name="templateLanguage" id="templateLanguageInput" placeholder="Idioma (ex: pt_BR)" value="pt_BR" />
+              <p class="hint" style="margin:2px 0 0">Deixe em branco para envio de texto livre (apenas dentro da janela de 24 h).</p>
+            </div>
+
             <button class="btn">Criar campanha</button>
           </form>
           <p id="campaignFeedback" class="feedback"></p>
@@ -486,6 +506,7 @@
                   <th>Nome</th>
                   <th>Nicho</th>
                   <th>Canal</th>
+                  <th>Template</th>
                   <th>Ação</th>
                 </tr>
               </thead>

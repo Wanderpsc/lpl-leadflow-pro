@@ -370,8 +370,56 @@ function renderLeads(leads) {
     .join('');
 }
 
+// ===== Template WhatsApp — canal e busca =====
+const campaignChannelSelect = document.getElementById('campaignChannelSelect');
+const whatsappTemplateFields = document.getElementById('whatsappTemplateFields');
+const fetchTemplatesBtn = document.getElementById('fetchTemplatesBtn');
+const templatePickerSelect = document.getElementById('templatePickerSelect');
+const templateNameInput = document.getElementById('templateNameInput');
+const templateLanguageInput = document.getElementById('templateLanguageInput');
+
+campaignChannelSelect?.addEventListener('change', () => {
+  const isWhatsApp = campaignChannelSelect.value === 'whatsapp';
+  whatsappTemplateFields?.classList.toggle('hidden', !isWhatsApp);
+});
+
+fetchTemplatesBtn?.addEventListener('click', async () => {
+  fetchTemplatesBtn.disabled = true;
+  fetchTemplatesBtn.textContent = 'Buscando…';
+  try {
+    const result = await http('/api/admin/whatsapp/templates');
+    const templates = result.data || [];
+    if (!templates.length) {
+      setFeedback(campaignFeedback, 'Nenhum template aprovado encontrado na WABA.', true);
+      return;
+    }
+    templatePickerSelect.innerHTML =
+      '<option value="">— Selecione um template —</option>' +
+      templates
+        .map(
+          (t) =>
+            `<option value="${t.name}" data-lang="${t.language}">${t.name} (${t.language}) — ${t.body.slice(0, 60)}${t.body.length > 60 ? '…' : ''}</option>`
+        )
+        .join('');
+    templatePickerSelect.classList.remove('hidden');
+  } catch (err) {
+    setFeedback(campaignFeedback, `Erro ao buscar templates: ${err.message}`, true);
+  } finally {
+    fetchTemplatesBtn.disabled = false;
+    fetchTemplatesBtn.textContent = 'Buscar';
+  }
+});
+
+templatePickerSelect?.addEventListener('change', () => {
+  const selected = templatePickerSelect.options[templatePickerSelect.selectedIndex];
+  if (selected?.value) {
+    if (templateNameInput) templateNameInput.value = selected.value;
+    if (templateLanguageInput) templateLanguageInput.value = selected.dataset.lang || 'pt_BR';
+  }
+});
+// ===== fim template WhatsApp =====
+
 // ===== Modal de disparo =====
-const dispatchModal = document.getElementById('dispatchModal');
 const dispatchModalTitle = document.getElementById('dispatchModalTitle');
 const dispatchModalClose = document.getElementById('dispatchModalClose');
 const dispatchSelectAll = document.getElementById('dispatchSelectAll');
@@ -440,7 +488,7 @@ dispatchConfirmBtn.addEventListener('click', async () => {
   if (!leadIds.length) return;
 
   dispatchConfirmBtn.disabled = true;
-  dispatchConfirmBtn.textContent = 'Enviando...';
+  dispatchConfirmBtn.textContent = 'Agendando…';
   dispatchModalFeedback.textContent = '';
 
   try {
@@ -448,13 +496,26 @@ dispatchConfirmBtn.addEventListener('click', async () => {
       method: 'POST',
       body: JSON.stringify({ leadIds })
     });
-    setFeedback(dispatchModalFeedback, `${result.message}`);
-    const infoMsg = result.failed > 0
-      ? `Campanha "${_dispatchCampaignName}": ${result.sent ?? result.leadsProcessed} enviados${result.failed ? `, ${result.failed} falhas` : ''}.`
-      : `Campanha "${_dispatchCampaignName}": ${result.leadsProcessed} leads disparados.`;
-    setFeedback(campaignFeedback, infoMsg, result.failed > 0 && result.sent === 0);
+
+    // API retorna 202: disparo está em segundo plano
+    const skippedNote = result.leadsSkipped > 0 ? ` (${result.leadsSkipped} já receberam esta campanha)` : '';
+    const modeNote = result.dispatchMode === 'whatsapp_template'
+      ? ' via template WhatsApp'
+      : result.dispatchMode === 'whatsapp_text'
+        ? ' via WhatsApp (texto livre)'
+        : ' (simulação)';
+
+    setFeedback(
+      dispatchModalFeedback,
+      `Disparo em andamento${modeNote}: ${result.leadsTotal} leads${skippedNote}. Acompanhe no histórico de disparos.`
+    );
+    setFeedback(
+      campaignFeedback,
+      `Campanha "${_dispatchCampaignName}" disparada${modeNote} para ${result.leadsTotal} leads.${skippedNote}`
+    );
+
     await refreshDashboard();
-    setTimeout(closeDispatchModal, 2500);
+    setTimeout(closeDispatchModal, 3500);
   } catch (error) {
     setFeedback(dispatchModalFeedback, error.message, true);
     dispatchConfirmBtn.disabled = false;
@@ -509,22 +570,28 @@ function renderCampaigns(campaigns) {
   campaignsCount.textContent = `${campaigns.length} registros`;
 
   if (!campaigns.length) {
-    campaignsTable.innerHTML = '<tr><td colspan="4">Sem campanhas.</td></tr>';
+    campaignsTable.innerHTML = '<tr><td colspan="5">Sem campanhas.</td></tr>';
     return;
   }
 
   campaignsTable.innerHTML = campaigns
     .map(
-      (campaign) => `
+      (campaign) => {
+        const templateBadge = campaign.template_name
+          ? `<span title="Template: ${campaign.template_name}" style="font-size:11px;background:#d1fae5;color:#065f46;padding:1px 5px;border-radius:4px;margin-left:4px">✓ template</span>`
+          : (campaign.channel === 'whatsapp'
+              ? `<span title="Sem template — só funciona em janela de 24h" style="font-size:11px;background:#fee2e2;color:#991b1b;padding:1px 5px;border-radius:4px;margin-left:4px">⚠ texto livre</span>`
+              : '');
+        return `
         <tr>
           <td>${campaign.name}</td>
           <td>${campaign.niche}</td>
-          <td>${campaign.channel}</td>
+          <td>${campaign.channel}${templateBadge}</td>
+          <td>${campaign.template_name ? `<span style="font-size:11px;color:var(--muted)">${campaign.template_name}</span>` : '—'}</td>
           <td><button class="btn" data-send-id="${campaign.id}" data-send-name="${campaign.name}">Disparar</button></td>
-        </tr>
-      `
-    )
-    .join('');
+        </tr>`;
+      }
+    ).join('');
 
   campaignsTable.querySelectorAll('[data-send-id]').forEach((button) => {
     button.addEventListener('click', () => {
@@ -1119,7 +1186,9 @@ campaignForm.addEventListener('submit', async (event) => {
     name: formData.get('name')?.toString().trim(),
     niche: formData.get('niche')?.toString().trim(),
     channel: formData.get('channel')?.toString().trim(),
-    messageTemplate: formData.get('messageTemplate')?.toString().trim()
+    messageTemplate: formData.get('messageTemplate')?.toString().trim(),
+    templateName: formData.get('templateName')?.toString().trim() || null,
+    templateLanguage: formData.get('templateLanguage')?.toString().trim() || 'pt_BR'
   };
 
   try {
@@ -1127,8 +1196,12 @@ campaignForm.addEventListener('submit', async (event) => {
       method: 'POST',
       body: JSON.stringify(payload)
     });
-    setFeedback(campaignFeedback, 'Campanha criada com sucesso.');
+    const templateHint = payload.templateName
+      ? ` (template: ${payload.templateName})`
+      : ' (texto livre — apenas para contatos que já iniciaram conversa)';
+    setFeedback(campaignFeedback, `Campanha criada com sucesso${payload.channel === 'whatsapp' ? templateHint : ''}.`);
     campaignForm.reset();
+    document.getElementById('whatsappTemplateFields')?.classList.add('hidden');
     await refreshDashboard();
   } catch (error) {
     setFeedback(campaignFeedback, error.message, true);
@@ -1369,7 +1442,7 @@ async function loadDispatchHistory() {
     const rows = res.data || [];
     if (dispatchHistoryCount) dispatchHistoryCount.textContent = `${rows.length} disparo${rows.length !== 1 ? 's' : ''}`;
     if (!rows.length) {
-      dispatchHistoryTable.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--muted)">Nenhum disparo realizado ainda.</td></tr>';
+      dispatchHistoryTable.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted)">Nenhum disparo realizado ainda.</td></tr>';
       return;
     }
     dispatchHistoryTable.innerHTML = rows.map((b) => {
@@ -1380,17 +1453,32 @@ async function loadDispatchHistory() {
       const failed = t.failed ?? 0;
       const total = b.total_leads ?? 0;
       const failColor = failed > 0 && sent === 0 ? 'color:var(--danger,#dc2626)' : failed > 0 ? 'color:#d97706' : '';
+
+      const modeLabel = {
+        whatsapp_template: '✓ template',
+        whatsapp_text: '⚠ texto livre',
+        whatsapp_cloud_api: '⚠ texto livre',
+        simulation: '— simulação'
+      }[b.dispatch_mode] || (b.channel === 'whatsapp' ? '⚠ texto livre' : b.channel || '-');
+
+      const statusBadge = b.status === 'processing'
+        ? '<span style="font-size:11px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:4px">em andamento</span>'
+        : b.status === 'done'
+          ? '<span style="font-size:11px;background:#d1fae5;color:#065f46;padding:1px 5px;border-radius:4px">concluído</span>'
+          : '';
+
       return `<tr>
         <td>${dateStr}</td>
         <td>${b.campaign_name || '-'}</td>
-        <td>${b.channel || '-'}</td>
+        <td>${modeLabel}</td>
         <td>${total}</td>
         <td style="color:var(--success,#16a34a)">${sent}</td>
         <td style="${failColor}">${failed}</td>
+        <td>${statusBadge}</td>
       </tr>`;
     }).join('');
   } catch (_err) {
-    if (dispatchHistoryTable) dispatchHistoryTable.innerHTML = '<tr><td colspan="6">Erro ao carregar histórico.</td></tr>';
+    if (dispatchHistoryTable) dispatchHistoryTable.innerHTML = '<tr><td colspan="7">Erro ao carregar histórico.</td></tr>';
   }
 }
 

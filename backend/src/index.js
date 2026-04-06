@@ -18,6 +18,10 @@ const TRIAL_DAYS = Number(process.env.TRIAL_DAYS || 7);
 const TRIAL_LEAD_LIMIT = Number(process.env.TRIAL_LEAD_LIMIT || 25);
 const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY || '';
 const WHATSAPP_GRAPH_API_VERSION = process.env.WHATSAPP_GRAPH_API_VERSION || 'v20.0';
+// Intervalo mínimo entre envios (ms) — evita rate-limit da Meta. Padrão: 1200ms (~50/min)
+const WHATSAPP_SEND_DELAY_MS = Number(process.env.WHATSAPP_SEND_DELAY_MS || 1200);
+// WABA ID para listar templates (opcional — necessário apenas para /api/admin/whatsapp/templates)
+// Definido em WHATSAPP_BUSINESS_ACCOUNT_ID no ambiente
 
 function hashPassword(password) {
   return crypto.createHash('sha256').update(password).digest('hex');
@@ -417,6 +421,73 @@ async function sendWhatsAppTextMessage({ to, message }) {
     status: response.status,
     providerResponse
   };
+}
+
+/**
+ * Envia uma mensagem usando template aprovado pela Meta.
+ * Obrigatório para contatos frios (janela de 24 h não aberta pelo lead).
+ * @param {object} opts
+ * @param {string} opts.to           – número em formato E.164 sem '+'  (ex: 5511999999999)
+ * @param {string} opts.templateName – nome exato do template aprovado na WABA
+ * @param {string} [opts.languageCode] – código de idioma do template (padrão: 'pt_BR')
+ * @param {string[]} [opts.bodyParams]  – valores para os placeholders {{1}}, {{2}}… no corpo
+ */
+async function sendWhatsAppTemplateMessage({ to, templateName, languageCode = 'pt_BR', bodyParams = [] }) {
+  if (!isWhatsAppConfigured()) {
+    throw new Error('WhatsApp Cloud API não configurada no ambiente.');
+  }
+
+  const url = `https://graph.facebook.com/${WHATSAPP_GRAPH_API_VERSION}/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+
+  const components = [];
+  if (bodyParams.length > 0) {
+    components.push({
+      type: 'body',
+      parameters: bodyParams.map((text) => ({ type: 'text', text: String(text) }))
+    });
+  }
+
+  const payload = {
+    messaging_product: 'whatsapp',
+    recipient_type: 'individual',
+    to,
+    type: 'template',
+    template: {
+      name: templateName,
+      language: { code: languageCode },
+      ...(components.length > 0 ? { components } : {})
+    }
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(payload)
+  });
+
+  let providerResponse = null;
+  try {
+    providerResponse = await response.json();
+  } catch (_err) {
+    providerResponse = null;
+  }
+
+  return { ok: response.ok, status: response.status, providerResponse };
+}
+
+/**
+ * Extrai os parâmetros posicionais ({{1}}, {{2}}, …) a partir do template
+ * de mensagem e dos dados do lead, para uso na API de template do WhatsApp.
+ */
+function extractTemplateParams(template, lead) {
+  const params = [];
+  if (/\{\{\s*(nome|name|1)\s*\}\}/i.test(template)) params.push(lead.full_name || '');
+  if (/\{\{\s*(telefone|phone|2)\s*\}\}/i.test(template)) params.push(lead.phone || '');
+  if (/\{\{\s*(email|3)\s*\}\}/i.test(template)) params.push(lead.email || '');
+  return params;
 }
 
 function buildReportSnapshot(db, companyId) {
@@ -1917,13 +1988,17 @@ app.post('/api/leads/:id/opt-out', requireAuth, (req, res) => {
 });
 
 app.post('/api/campaigns', requireAuth, (req, res) => {
-  const { name, niche, channel, messageTemplate } = req.body;
+  const { name, niche, channel, messageTemplate, templateName, templateLanguage } = req.body;
 
   if (!name || !niche || !channel || !messageTemplate) {
     return res.status(400).json({
       error: 'Campos obrigatórios: name, niche, channel, messageTemplate.'
     });
   }
+
+  // Para canal WhatsApp, o templateName é fortemente recomendado (contatos frios)
+  const normalizedTemplateName = templateName ? String(templateName).trim() : null;
+  const normalizedTemplateLanguage = templateLanguage ? String(templateLanguage).trim() : 'pt_BR';
 
   const id = uuidv4();
   const now = new Date().toISOString();
@@ -1940,6 +2015,8 @@ app.post('/api/campaigns', requireAuth, (req, res) => {
     niche,
     channel,
     message_template: messageTemplate,
+    template_name: normalizedTemplateName,
+    template_language: normalizedTemplateLanguage,
     created_at: now
   });
   saveDb(db);
@@ -2031,101 +2108,140 @@ app.post('/api/campaigns/:id/send', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Não há leads elegíveis para esta campanha.' });
   }
 
-  const now = new Date().toISOString();
-  const batchId = uuidv4();
-  const byStatus = { sent: 0, delivered: 0, responded: 0, failed: 0 };
+  // Pula leads que já receberam esta campanha com sucesso (evita spam/bloqueio)
+  const alreadySentLeadIds = new Set(
+    db.messageLogs
+      .filter((log) => log.campaign_id === campaignId && log.send_status === 'sent')
+      .map((log) => log.lead_id)
+  );
+  const pendingLeads = leads.filter((lead) => !alreadySentLeadIds.has(lead.id));
 
-  const canUseRealWhatsApp = campaign.channel === 'whatsapp' && isWhatsAppConfigured();
-
-  for (const lead of leads) {
-    let status;
-    let providerResponse = null;
-
-    if (canUseRealWhatsApp) {
-      const recipient = normalizeWhatsAppRecipient(lead.phone);
-      if (!recipient) {
-        status = {
-          sendStatus: 'failed',
-          deliveryStatus: 'failed',
-          engagementStatus: 'no_response'
-        };
-        providerResponse = { error: 'Lead sem telefone válido para WhatsApp.' };
-      } else {
-        const message = renderCampaignMessage(campaign.message_template, lead);
-        try {
-          const providerResult = await sendWhatsAppTextMessage({
-            to: recipient,
-            message
-          });
-
-          providerResponse = providerResult.providerResponse || { status: providerResult.status };
-          status = providerResult.ok
-            ? {
-                sendStatus: 'sent',
-                deliveryStatus: 'delivered',
-                engagementStatus: 'no_response'
-              }
-            : {
-                sendStatus: 'failed',
-                deliveryStatus: 'failed',
-                engagementStatus: 'no_response'
-              };
-        } catch (error) {
-          status = {
-            sendStatus: 'failed',
-            deliveryStatus: 'failed',
-            engagementStatus: 'no_response'
-          };
-          providerResponse = { error: error.message };
-        }
-      }
-    } else {
-      status = randomStatus();
-    }
-
-    byStatus.sent += status.sendStatus === 'sent' ? 1 : 0;
-    byStatus.delivered += status.deliveryStatus === 'delivered' ? 1 : 0;
-    byStatus.responded += status.engagementStatus === 'responded' ? 1 : 0;
-    byStatus.failed += status.deliveryStatus === 'failed' ? 1 : 0;
-
-    db.messageLogs.push({
-      id: uuidv4(),
-      company_id: companyId,
-      campaign_id: campaign.id,
-      lead_id: lead.id,
-      channel: campaign.channel,
-      send_status: status.sendStatus,
-      delivery_status: status.deliveryStatus,
-      engagement_status: status.engagementStatus,
-      provider_response: providerResponse,
-      created_at: now
-    });
+  if (pendingLeads.length === 0) {
+    return res.status(400).json({ error: 'Todos os leads selecionados já receberam esta campanha.' });
   }
 
+  const now = new Date().toISOString();
+  const batchId = uuidv4();
+  const canUseRealWhatsApp = campaign.channel === 'whatsapp' && isWhatsAppConfigured();
+  const usesTemplate = canUseRealWhatsApp && !!campaign.template_name;
+
+  // Cria o registro do lote imediatamente com status 'processing'
   db.dispatchBatches.push({
     id: batchId,
     company_id: companyId,
     campaign_id: campaign.id,
     campaign_name: campaign.name,
     channel: campaign.channel,
-    total_leads: leads.length,
-    totals: byStatus,
+    total_leads: pendingLeads.length,
+    totals: { sent: 0, delivered: 0, responded: 0, failed: 0 },
+    status: 'processing',
+    dispatch_mode: canUseRealWhatsApp ? (usesTemplate ? 'whatsapp_template' : 'whatsapp_text') : 'simulation',
     created_by: req.auth.user.id,
     created_at: now
   });
-
   saveDb(db);
 
-  return res.json({
+  // Responde imediatamente — o envio real ocorre em segundo plano
+  res.status(202).json({
     message: canUseRealWhatsApp
-      ? `Disparo via WhatsApp: ${byStatus.sent} enviados, ${byStatus.failed} falhas.`
-      : `Disparo simulado: ${leads.length} leads processados.`,
-    campaignId,
-    leadsProcessed: leads.length,
-    sent: byStatus.sent,
-    failed: byStatus.failed,
-    dispatchMode: canUseRealWhatsApp ? 'whatsapp_cloud_api' : 'simulation',
-    batchId
+      ? `Disparo iniciado em segundo plano via WhatsApp${usesTemplate ? ' (template)' : ' (texto)'} para ${pendingLeads.length} leads. Acompanhe o histórico de disparos.`
+      : `Disparo simulado iniciado para ${pendingLeads.length} leads. Acompanhe o histórico de disparos.`,
+    batchId,
+    leadsTotal: pendingLeads.length,
+    leadsSkipped: leads.length - pendingLeads.length,
+    dispatchMode: canUseRealWhatsApp ? (usesTemplate ? 'whatsapp_template' : 'whatsapp_text') : 'simulation',
+    sent: 0,
+    failed: 0
+  });
+
+  // ─── Background: executa envios sem bloquear o HTTP ───────────────────────
+  setImmediate(async () => {
+    const byStatus = { sent: 0, delivered: 0, responded: 0, failed: 0 };
+    const logEntries = [];
+    const dispatchNow = new Date().toISOString();
+
+    for (let i = 0; i < pendingLeads.length; i++) {
+      const lead = pendingLeads[i];
+
+      // Delay com jitter entre envios reais (evita rate-limit e padrão robótico)
+      if (canUseRealWhatsApp && i > 0 && WHATSAPP_SEND_DELAY_MS > 0) {
+        const jitter = Math.floor(Math.random() * 1500);
+        await new Promise((resolve) => setTimeout(resolve, WHATSAPP_SEND_DELAY_MS + jitter));
+      }
+
+      let status;
+      let providerResponse = null;
+
+      if (canUseRealWhatsApp) {
+        const recipient = normalizeWhatsAppRecipient(lead.phone);
+        if (!recipient) {
+          status = { sendStatus: 'failed', deliveryStatus: 'failed', engagementStatus: 'no_response' };
+          providerResponse = { error: 'Lead sem telefone válido para WhatsApp.' };
+        } else {
+          try {
+            let providerResult;
+
+            if (usesTemplate) {
+              // ✅ Template aprovado: funciona com contatos frios (leads de anúncios)
+              const bodyParams = extractTemplateParams(campaign.message_template, lead);
+              providerResult = await sendWhatsAppTemplateMessage({
+                to: recipient,
+                templateName: campaign.template_name,
+                languageCode: campaign.template_language || 'pt_BR',
+                bodyParams
+              });
+            } else {
+              // ⚠️ Texto livre: só funciona se o lead enviou mensagem nas últimas 24 h
+              const message = renderCampaignMessage(campaign.message_template, lead);
+              providerResult = await sendWhatsAppTextMessage({ to: recipient, message });
+            }
+
+            providerResponse = providerResult.providerResponse || { status: providerResult.status };
+            status = providerResult.ok
+              ? { sendStatus: 'sent', deliveryStatus: 'delivered', engagementStatus: 'no_response' }
+              : { sendStatus: 'failed', deliveryStatus: 'failed', engagementStatus: 'no_response' };
+          } catch (err) {
+            status = { sendStatus: 'failed', deliveryStatus: 'failed', engagementStatus: 'no_response' };
+            providerResponse = { error: err.message };
+          }
+        }
+      } else {
+        status = randomStatus();
+      }
+
+      byStatus.sent += status.sendStatus === 'sent' ? 1 : 0;
+      byStatus.delivered += status.deliveryStatus === 'delivered' ? 1 : 0;
+      byStatus.responded += status.engagementStatus === 'responded' ? 1 : 0;
+      byStatus.failed += status.deliveryStatus === 'failed' ? 1 : 0;
+
+      logEntries.push({
+        id: uuidv4(),
+        company_id: companyId,
+        campaign_id: campaign.id,
+        lead_id: lead.id,
+        channel: campaign.channel,
+        send_status: status.sendStatus,
+        delivery_status: status.deliveryStatus,
+        engagement_status: status.engagementStatus,
+        provider_response: providerResponse,
+        created_at: dispatchNow
+      });
+    }
+
+    // Persiste resultados de forma atômica após o loop
+    try {
+      const finalDb = loadDb();
+      finalDb.messageLogs.push(...logEntries);
+      const batch = finalDb.dispatchBatches.find((item) => item.id === batchId);
+      if (batch) {
+        batch.totals = byStatus;
+        batch.status = 'done';
+        batch.completed_at = new Date().toISOString();
+      }
+      saveDb(finalDb);
+    } catch (persistErr) {
+      console.error(`[dispatch:${batchId}] Erro ao persistir resultados:`, persistErr.message);
+    }
   });
 });
 
@@ -2360,6 +2476,133 @@ app.post('/api/prospects/:id/convert', requireAuth, (req, res) => {
 });
 
 // ===== fim prospecção =====
+
+// ===== WhatsApp Cloud API – status e teste =====
+
+/**
+ * GET /api/admin/whatsapp/status
+ * Retorna se a integração WhatsApp está configurada e exibe o Phone Number ID mascarado.
+ */
+app.get('/api/admin/whatsapp/status', requireAuth, requireAdmin, (_req, res) => {
+  const configured = isWhatsAppConfigured();
+  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || '';
+  const tokenSet = !!process.env.WHATSAPP_ACCESS_TOKEN;
+  return res.json({
+    configured,
+    phone_number_id: phoneId ? `${phoneId.slice(0, 4)}${'*'.repeat(Math.max(0, phoneId.length - 4))}` : null,
+    access_token_set: tokenSet,
+    api_version: WHATSAPP_GRAPH_API_VERSION
+  });
+});
+
+/**
+ * GET /api/admin/whatsapp/templates
+ * Lista os templates aprovados cadastrados na WABA.
+ * Documentação Meta: GET /<WABA_ID>/message_templates
+ */
+app.get('/api/admin/whatsapp/templates', requireAuth, requireAdmin, async (_req, res) => {
+  if (!isWhatsAppConfigured()) {
+    return res.status(400).json({ error: 'WhatsApp Cloud API não configurada.' });
+  }
+
+  const wabaId = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
+  if (!wabaId) {
+    return res.status(400).json({
+      error: 'WHATSAPP_BUSINESS_ACCOUNT_ID não definido. Adicione nas variáveis de ambiente.'
+    });
+  }
+
+  try {
+    const params = new URLSearchParams({
+      fields: 'name,status,language,category,components',
+      limit: '100',
+      access_token: process.env.WHATSAPP_ACCESS_TOKEN
+    });
+    const url = `https://graph.facebook.com/${WHATSAPP_GRAPH_API_VERSION}/${wabaId}/message_templates?${params}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(502).json({
+        error: `Meta API: ${data.error?.message || 'Erro ao buscar templates.'}`
+      });
+    }
+
+    const templates = (data.data || [])
+      .filter((t) => t.status === 'APPROVED')
+      .map((t) => ({
+        name: t.name,
+        language: t.language,
+        category: t.category,
+        status: t.status,
+        body: t.components?.find((c) => c.type === 'BODY')?.text || ''
+      }));
+
+    return res.json({ total: templates.length, data: templates });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/campaigns/:id/batch/:batchId
+ * Consulta o status de um lote de disparo (para polling frontend).
+ */
+app.get('/api/campaigns/:id/batch/:batchId', requireAuth, (req, res) => {
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) return res.status(404).json({ error: 'Empresa não encontrada.' });
+
+  const batch = db.dispatchBatches.find(
+    (item) => item.id === req.params.batchId && item.campaign_id === req.params.id && item.company_id === companyId
+  );
+  if (!batch) return res.status(404).json({ error: 'Lote não encontrado.' });
+
+  return res.json({ batch });
+});
+
+/**
+ * POST /api/admin/whatsapp/test
+ * Envia uma mensagem de teste ao número informado.
+ * Body: { phone: "+5511999999999", message: "Olá, teste!" }
+ */
+app.post('/api/admin/whatsapp/test', requireAuth, requireAdmin, async (req, res) => {
+  if (!isWhatsAppConfigured()) {
+    return res.status(400).json({
+      error: 'WHATSAPP_ACCESS_TOKEN e WHATSAPP_PHONE_NUMBER_ID não estão definidos nas variáveis de ambiente do servidor.'
+    });
+  }
+
+  const { phone, message } = req.body || {};
+  if (!phone) return res.status(400).json({ error: 'Informe o campo "phone".' });
+
+  const recipient = normalizeWhatsAppRecipient(phone);
+  if (!recipient) {
+    return res.status(400).json({ error: `Número de telefone inválido: "${phone}". Use formato internacional, ex: +5511999999999` });
+  }
+
+  try {
+    const result = await sendWhatsAppTextMessage({
+      to: recipient,
+      message: message || 'Mensagem de teste enviada pelo LeadFlow Nexus Pro ✅'
+    });
+
+    if (result.ok) {
+      return res.json({ success: true, recipient, providerResponse: result.providerResponse });
+    } else {
+      return res.status(502).json({
+        success: false,
+        recipient,
+        status: result.status,
+        providerResponse: result.providerResponse
+      });
+    }
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ===== fim WhatsApp status/teste =====
 
 app.listen(PORT, () => {
   console.log(`LeadFlow Nexus Pro API running on http://localhost:${PORT}`);
