@@ -381,6 +381,59 @@
         </article>
       </section>
 
+      <!-- ===== CONFIGURAÇÃO WHATSAPP ===== -->
+      <section class="grid one-col" id="whatsappSettingsSection">
+        <article class="card">
+          <h2>📱 Configuração WhatsApp (sua conta)</h2>
+          <p class="small-muted">
+            Conecte <strong>sua própria conta WhatsApp Business</strong> para enviar mensagens reais.
+            <a href="https://developers.facebook.com/apps" target="_blank" rel="noopener noreferrer">Abrir Meta Developers</a>
+          </p>
+
+          <div id="whatsappStatusBadge" style="margin-bottom:12px"></div>
+
+          <form id="whatsappSettingsForm" class="form">
+            <div class="form-grid-2">
+              <div>
+                <label style="font-size:13px;font-weight:600">Access Token <span style="color:var(--danger)">*</span></label>
+                <input name="accessToken" type="password" placeholder="EAA..." autocomplete="off" required />
+                <p class="hint">Token permanente do System User. <a href="https://business.facebook.com/settings" target="_blank" rel="noopener noreferrer">Meta Business</a></p>
+              </div>
+              <div>
+                <label style="font-size:13px;font-weight:600">Phone Number ID <span style="color:var(--danger)">*</span></label>
+                <input name="phoneNumberId" placeholder="Ex: 123456789012345" required />
+                <p class="hint">Painel do App Meta → WhatsApp → Início → Phone Number ID</p>
+              </div>
+              <div>
+                <label style="font-size:13px;font-weight:600">WABA ID (WhatsApp Business Account ID)</label>
+                <input name="businessAccountId" placeholder="Ex: 987654321098765" />
+                <p class="hint">Necessário para listar templates. Meta Business → Contas do WhatsApp</p>
+              </div>
+              <div>
+                <label style="font-size:13px;font-weight:600">Versão da API</label>
+                <input name="apiVersion" placeholder="v20.0" value="v20.0" />
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+              <button class="btn" type="submit">Salvar credenciais</button>
+              <button class="btn secondary" type="button" id="testWhatsappBtn">Testar envio</button>
+              <button class="btn secondary" type="button" id="removeWhatsappBtn" style="color:var(--danger)">Remover</button>
+            </div>
+          </form>
+
+          <div id="testWhatsappPanel" class="hidden" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px">
+            <label style="font-size:13px;font-weight:600">Número para teste</label>
+            <div style="display:flex;gap:8px;margin-top:4px">
+              <input id="testWhatsappPhone" placeholder="+5511999999999" style="flex:1" />
+              <button class="btn" id="sendTestWhatsappBtn">Enviar</button>
+            </div>
+            <p id="testWhatsappFeedback" class="feedback" style="margin-top:6px"></p>
+          </div>
+
+          <p id="whatsappSettingsFeedback" class="feedback" style="margin-top:8px"></p>
+        </article>
+      </section>
+
       <!-- ===== PROSPECÇÃO ===== -->
       <section class="grid two-cols" id="prospectingSection">
         <article class="card">

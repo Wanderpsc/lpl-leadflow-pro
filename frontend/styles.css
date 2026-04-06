@@ -218,6 +218,20 @@ body {
   grid-template-columns: 1fr 1fr;
 }
 
+.one-col {
+  grid-template-columns: 1fr;
+}
+
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .form-grid-2 { grid-template-columns: 1fr; }
+}
+
 .card {
   background: var(--card);
   border: 1px solid var(--border);

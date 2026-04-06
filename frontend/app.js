@@ -387,7 +387,7 @@ fetchTemplatesBtn?.addEventListener('click', async () => {
   fetchTemplatesBtn.disabled = true;
   fetchTemplatesBtn.textContent = 'Buscando…';
   try {
-    const result = await http('/api/admin/whatsapp/templates');
+    const result = await http('/api/settings/whatsapp/templates');
     const templates = result.data || [];
     if (!templates.length) {
       setFeedback(campaignFeedback, 'Nenhum template aprovado encontrado na WABA.', true);
@@ -808,6 +808,7 @@ async function refreshDashboard() {
   renderReportsHistory(reportsHistory.data || []);
   loadProspects();
   loadDispatchHistory();
+  loadWhatsAppStatus();
 
   if (licenseInfo?.license && !isAdmin()) {
     const remaining =
@@ -1481,6 +1482,95 @@ async function loadDispatchHistory() {
     if (dispatchHistoryTable) dispatchHistoryTable.innerHTML = '<tr><td colspan="7">Erro ao carregar histórico.</td></tr>';
   }
 }
+
+// ===== Configuração WhatsApp por empresa =====
+const whatsappSettingsForm   = document.getElementById('whatsappSettingsForm');
+const whatsappSettingsFb     = document.getElementById('whatsappSettingsFeedback');
+const whatsappStatusBadge    = document.getElementById('whatsappStatusBadge');
+const testWhatsappBtn        = document.getElementById('testWhatsappBtn');
+const removeWhatsappBtn      = document.getElementById('removeWhatsappBtn');
+const testWhatsappPanel      = document.getElementById('testWhatsappPanel');
+const testWhatsappPhone      = document.getElementById('testWhatsappPhone');
+const sendTestWhatsappBtn    = document.getElementById('sendTestWhatsappBtn');
+const testWhatsappFeedback   = document.getElementById('testWhatsappFeedback');
+
+async function loadWhatsAppStatus() {
+  if (!whatsappStatusBadge) return;
+  try {
+    const res = await http('/api/settings/whatsapp');
+    if (res.configured) {
+      whatsappStatusBadge.innerHTML = `
+        <span style="display:inline-flex;align-items:center;gap:6px;background:#d1fae5;color:#065f46;padding:5px 10px;border-radius:6px;font-size:13px">
+          ✅ WhatsApp conectado
+          <span style="color:#6b7280">• Phone ID: ${res.phone_number_id || '—'}</span>
+          ${res.business_account_id ? `<span style="color:#6b7280">• WABA: ${res.business_account_id}</span>` : ''}
+        </span>`;
+    } else {
+      whatsappStatusBadge.innerHTML = `
+        <span style="display:inline-flex;align-items:center;gap:6px;background:#fee2e2;color:#991b1b;padding:5px 10px;border-radius:6px;font-size:13px">
+          ⚠️ WhatsApp não configurado — disparos serão simulados
+        </span>`;
+    }
+  } catch (_e) {
+    whatsappStatusBadge.innerHTML = '';
+  }
+}
+
+whatsappSettingsForm?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(whatsappSettingsForm);
+  try {
+    await http('/api/settings/whatsapp', {
+      method: 'PUT',
+      body: JSON.stringify({
+        accessToken: fd.get('accessToken')?.toString().trim(),
+        phoneNumberId: fd.get('phoneNumberId')?.toString().trim(),
+        businessAccountId: fd.get('businessAccountId')?.toString().trim() || null,
+        apiVersion: fd.get('apiVersion')?.toString().trim() || 'v20.0'
+      })
+    });
+    setFeedback(whatsappSettingsFb, 'Credenciais salvas com sucesso!');
+    whatsappSettingsForm.querySelector('input[name="accessToken"]').value = '';
+    await loadWhatsAppStatus();
+  } catch (err) {
+    setFeedback(whatsappSettingsFb, err.message, true);
+  }
+});
+
+testWhatsappBtn?.addEventListener('click', () => {
+  testWhatsappPanel?.classList.toggle('hidden');
+});
+
+sendTestWhatsappBtn?.addEventListener('click', async () => {
+  const phone = testWhatsappPhone?.value?.trim();
+  if (!phone) { setFeedback(testWhatsappFeedback, 'Informe o número.', true); return; }
+  sendTestWhatsappBtn.disabled = true;
+  sendTestWhatsappBtn.textContent = 'Enviando…';
+  try {
+    const res = await http('/api/settings/whatsapp/test', {
+      method: 'POST',
+      body: JSON.stringify({ phone })
+    });
+    setFeedback(testWhatsappFeedback, `Enviado com sucesso para ${res.recipient}!`);
+  } catch (err) {
+    setFeedback(testWhatsappFeedback, err.message, true);
+  } finally {
+    sendTestWhatsappBtn.disabled = false;
+    sendTestWhatsappBtn.textContent = 'Enviar';
+  }
+});
+
+removeWhatsappBtn?.addEventListener('click', async () => {
+  if (!confirm('Tem certeza que quer remover as credenciais WhatsApp desta conta?')) return;
+  try {
+    await http('/api/settings/whatsapp', { method: 'DELETE' });
+    setFeedback(whatsappSettingsFb, 'Credenciais removidas.');
+    await loadWhatsAppStatus();
+  } catch (err) {
+    setFeedback(whatsappSettingsFb, err.message, true);
+  }
+});
+// ===== fim configuração WhatsApp =====
 
 refreshAll.addEventListener('click', async () => {
   try {

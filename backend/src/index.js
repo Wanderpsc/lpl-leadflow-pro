@@ -58,7 +58,8 @@ function loadDb() {
       leads: [],
       campaigns: [],
       messageLogs: [],
-      prospects: []
+      prospects: [],
+      whatsappConfigs: []
     };
     fs.writeFileSync(dbPath, JSON.stringify(initial, null, 2));
   }
@@ -83,6 +84,7 @@ function loadDb() {
   if (!Array.isArray(parsed.campaigns)) parsed.campaigns = [];
   if (!Array.isArray(parsed.messageLogs)) parsed.messageLogs = [];
   if (!Array.isArray(parsed.prospects)) parsed.prospects = [];
+  if (!Array.isArray(parsed.whatsappConfigs)) parsed.whatsappConfigs = [];
 
   const now = new Date().toISOString();
   let defaultCompany = parsed.companies.find((company) => company.slug === 'default');
@@ -356,6 +358,39 @@ function isWhatsAppConfigured() {
   return !!(process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID);
 }
 
+/**
+ * Retorna as credenciais WhatsApp de uma empresa específica.
+ * Prioridade: configuração salva no banco → variáveis de ambiente do servidor (fallback).
+ */
+function getCompanyWhatsAppCreds(db, companyId) {
+  const saved = db.whatsappConfigs
+    ? db.whatsappConfigs.find((c) => c.company_id === companyId)
+    : null;
+
+  if (saved && saved.access_token && saved.phone_number_id) {
+    return {
+      accessToken: saved.access_token,
+      phoneNumberId: saved.phone_number_id,
+      businessAccountId: saved.business_account_id || null,
+      apiVersion: saved.api_version || WHATSAPP_GRAPH_API_VERSION,
+      source: 'company'
+    };
+  }
+
+  // Fallback: variáveis de ambiente do servidor
+  if (process.env.WHATSAPP_ACCESS_TOKEN && process.env.WHATSAPP_PHONE_NUMBER_ID) {
+    return {
+      accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
+      phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+      businessAccountId: process.env.WHATSAPP_BUSINESS_ACCOUNT_ID || null,
+      apiVersion: WHATSAPP_GRAPH_API_VERSION,
+      source: 'env'
+    };
+  }
+
+  return null;
+}
+
 function normalizeWhatsAppRecipient(phone) {
   const raw = String(phone || '').trim();
   if (!raw) return null;
@@ -385,16 +420,22 @@ function renderCampaignMessage(template, lead) {
     .trim();
 }
 
-async function sendWhatsAppTextMessage({ to, message }) {
-  if (!isWhatsAppConfigured()) {
-    throw new Error('WhatsApp Cloud API não configurada no ambiente.');
+async function sendWhatsAppTextMessage({ to, message, creds }) {
+  const c = creds || {
+    accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
+    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+    apiVersion: WHATSAPP_GRAPH_API_VERSION
+  };
+
+  if (!c.accessToken || !c.phoneNumberId) {
+    throw new Error('WhatsApp Cloud API não configurada.');
   }
 
-  const url = `https://graph.facebook.com/${WHATSAPP_GRAPH_API_VERSION}/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+  const url = `https://graph.facebook.com/${c.apiVersion || WHATSAPP_GRAPH_API_VERSION}/${c.phoneNumberId}/messages`;
   const response = await fetch(url, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+      Authorization: `Bearer ${c.accessToken}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
@@ -432,12 +473,18 @@ async function sendWhatsAppTextMessage({ to, message }) {
  * @param {string} [opts.languageCode] – código de idioma do template (padrão: 'pt_BR')
  * @param {string[]} [opts.bodyParams]  – valores para os placeholders {{1}}, {{2}}… no corpo
  */
-async function sendWhatsAppTemplateMessage({ to, templateName, languageCode = 'pt_BR', bodyParams = [] }) {
-  if (!isWhatsAppConfigured()) {
-    throw new Error('WhatsApp Cloud API não configurada no ambiente.');
+async function sendWhatsAppTemplateMessage({ to, templateName, languageCode = 'pt_BR', bodyParams = [], creds }) {
+  const c = creds || {
+    accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
+    phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+    apiVersion: WHATSAPP_GRAPH_API_VERSION
+  };
+
+  if (!c.accessToken || !c.phoneNumberId) {
+    throw new Error('WhatsApp Cloud API não configurada.');
   }
 
-  const url = `https://graph.facebook.com/${WHATSAPP_GRAPH_API_VERSION}/${process.env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+  const url = `https://graph.facebook.com/${c.apiVersion || WHATSAPP_GRAPH_API_VERSION}/${c.phoneNumberId}/messages`;
 
   const components = [];
   if (bodyParams.length > 0) {
@@ -462,7 +509,7 @@ async function sendWhatsAppTemplateMessage({ to, templateName, languageCode = 'p
   const response = await fetch(url, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${process.env.WHATSAPP_ACCESS_TOKEN}`,
+      Authorization: `Bearer ${c.accessToken}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify(payload)
@@ -2122,7 +2169,8 @@ app.post('/api/campaigns/:id/send', requireAuth, async (req, res) => {
 
   const now = new Date().toISOString();
   const batchId = uuidv4();
-  const canUseRealWhatsApp = campaign.channel === 'whatsapp' && isWhatsAppConfigured();
+  const companyCreds = getCompanyWhatsAppCreds(db, companyId);
+  const canUseRealWhatsApp = campaign.channel === 'whatsapp' && !!companyCreds;
   const usesTemplate = canUseRealWhatsApp && !!campaign.template_name;
 
   // Cria o registro do lote imediatamente com status 'processing'
@@ -2188,12 +2236,13 @@ app.post('/api/campaigns/:id/send', requireAuth, async (req, res) => {
                 to: recipient,
                 templateName: campaign.template_name,
                 languageCode: campaign.template_language || 'pt_BR',
-                bodyParams
+                bodyParams,
+                creds: companyCreds
               });
             } else {
               // ⚠️ Texto livre: só funciona se o lead enviou mensagem nas últimas 24 h
               const message = renderCampaignMessage(campaign.message_template, lead);
-              providerResult = await sendWhatsAppTextMessage({ to: recipient, message });
+              providerResult = await sendWhatsAppTextMessage({ to: recipient, message, creds: companyCreds });
             }
 
             providerResponse = providerResult.providerResponse || { status: providerResult.status };
@@ -2477,7 +2526,203 @@ app.post('/api/prospects/:id/convert', requireAuth, (req, res) => {
 
 // ===== fim prospecção =====
 
-// ===== WhatsApp Cloud API – status e teste =====
+// ===== Configurações WhatsApp por empresa =====
+
+function maskSecret(value) {
+  if (!value) return null;
+  const s = String(value);
+  if (s.length <= 8) return '*'.repeat(s.length);
+  return `${s.slice(0, 4)}${'*'.repeat(s.length - 8)}${s.slice(-4)}`;
+}
+
+/**
+ * GET /api/settings/whatsapp
+ * Retorna a configuração WhatsApp da empresa logada (valores mascarados).
+ */
+app.get('/api/settings/whatsapp', requireAuth, (req, res) => {
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) return res.status(404).json({ error: 'Empresa não encontrada.' });
+
+  const cfg = db.whatsappConfigs.find((c) => c.company_id === companyId);
+
+  if (!cfg) {
+    return res.json({
+      configured: false,
+      phone_number_id: null,
+      business_account_id: null,
+      access_token_set: false,
+      source: null
+    });
+  }
+
+  return res.json({
+    configured: !!(cfg.access_token && cfg.phone_number_id),
+    phone_number_id: maskSecret(cfg.phone_number_id),
+    business_account_id: maskSecret(cfg.business_account_id),
+    access_token_set: !!cfg.access_token,
+    access_token_preview: maskSecret(cfg.access_token),
+    api_version: cfg.api_version || WHATSAPP_GRAPH_API_VERSION,
+    updated_at: cfg.updated_at,
+    source: 'company'
+  });
+});
+
+/**
+ * PUT /api/settings/whatsapp
+ * Salva ou atualiza as credenciais WhatsApp da empresa logada.
+ * Body: { accessToken, phoneNumberId, businessAccountId, apiVersion }
+ */
+app.put('/api/settings/whatsapp', requireAuth, (req, res) => {
+  const { accessToken, phoneNumberId, businessAccountId, apiVersion } = req.body || {};
+
+  if (!accessToken || !phoneNumberId) {
+    return res.status(400).json({ error: 'accessToken e phoneNumberId são obrigatórios.' });
+  }
+
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) return res.status(404).json({ error: 'Empresa não encontrada.' });
+
+  const now = new Date().toISOString();
+  const existing = db.whatsappConfigs.find((c) => c.company_id === companyId);
+
+  if (existing) {
+    existing.access_token = String(accessToken).trim();
+    existing.phone_number_id = String(phoneNumberId).trim();
+    existing.business_account_id = businessAccountId ? String(businessAccountId).trim() : (existing.business_account_id || null);
+    existing.api_version = apiVersion ? String(apiVersion).trim() : (existing.api_version || WHATSAPP_GRAPH_API_VERSION);
+    existing.updated_at = now;
+  } else {
+    db.whatsappConfigs.push({
+      id: uuidv4(),
+      company_id: companyId,
+      access_token: String(accessToken).trim(),
+      phone_number_id: String(phoneNumberId).trim(),
+      business_account_id: businessAccountId ? String(businessAccountId).trim() : null,
+      api_version: apiVersion ? String(apiVersion).trim() : WHATSAPP_GRAPH_API_VERSION,
+      created_at: now,
+      updated_at: now
+    });
+  }
+
+  appendSecurityAudit(db, req, {
+    event_type: 'whatsapp_config_updated',
+    status: 'success',
+    actor_user_id: req.auth.user.id,
+    actor_email: req.auth.user.email,
+    company_id: companyId
+  });
+
+  saveDb(db);
+
+  return res.json({ message: 'Configuração WhatsApp salva com sucesso.' });
+});
+
+/**
+ * DELETE /api/settings/whatsapp
+ * Remove as credenciais WhatsApp da empresa (volta para o fallback de ambiente).
+ */
+app.delete('/api/settings/whatsapp', requireAuth, (req, res) => {
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) return res.status(404).json({ error: 'Empresa não encontrada.' });
+
+  db.whatsappConfigs = db.whatsappConfigs.filter((c) => c.company_id !== companyId);
+  saveDb(db);
+  return res.json({ message: 'Configuração WhatsApp removida.' });
+});
+
+/**
+ * POST /api/settings/whatsapp/test
+ * Testa as credenciais WhatsApp da empresa enviando mensagem de teste.
+ * Body: { phone: "+5511999999999", message?: "..." }
+ */
+app.post('/api/settings/whatsapp/test', requireAuth, async (req, res) => {
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) return res.status(404).json({ error: 'Empresa não encontrada.' });
+
+  const creds = getCompanyWhatsAppCreds(db, companyId);
+  if (!creds) {
+    return res.status(400).json({ error: 'Nenhuma configuração WhatsApp encontrada para esta empresa.' });
+  }
+
+  const { phone, message } = req.body || {};
+  if (!phone) return res.status(400).json({ error: 'Informe o campo "phone".' });
+
+  const recipient = normalizeWhatsAppRecipient(phone);
+  if (!recipient) {
+    return res.status(400).json({ error: `Número inválido: "${phone}". Use formato internacional, ex: +5511999999999` });
+  }
+
+  try {
+    const result = await sendWhatsAppTextMessage({
+      to: recipient,
+      message: message || 'Mensagem de teste enviada pelo LeadFlow Nexus Pro ✅',
+      creds
+    });
+
+    if (result.ok) {
+      return res.json({ success: true, recipient, source: creds.source, providerResponse: result.providerResponse });
+    }
+    return res.status(502).json({ success: false, recipient, status: result.status, providerResponse: result.providerResponse });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/settings/whatsapp/templates
+ * Lista templates aprovados usando as credenciais da empresa logada.
+ */
+app.get('/api/settings/whatsapp/templates', requireAuth, async (req, res) => {
+  const db = req.auth.db;
+  const companyId = resolveCompanyId(req, req.auth.user, db);
+  if (!companyId) return res.status(404).json({ error: 'Empresa não encontrada.' });
+
+  const creds = getCompanyWhatsAppCreds(db, companyId);
+  if (!creds) {
+    return res.status(400).json({ error: 'Configure suas credenciais WhatsApp primeiro.' });
+  }
+
+  if (!creds.businessAccountId) {
+    return res.status(400).json({ error: 'businessAccountId (WABA ID) não configurado. Adicione-o nas configurações WhatsApp.' });
+  }
+
+  try {
+    const params = new URLSearchParams({
+      fields: 'name,status,language,category,components',
+      limit: '100',
+      access_token: creds.accessToken
+    });
+    const url = `https://graph.facebook.com/${creds.apiVersion}/${creds.businessAccountId}/message_templates?${params}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (!response.ok) {
+      return res.status(502).json({ error: `Meta API: ${data.error?.message || 'Erro ao buscar templates.'}` });
+    }
+
+    const templates = (data.data || [])
+      .filter((t) => t.status === 'APPROVED')
+      .map((t) => ({
+        name: t.name,
+        language: t.language,
+        category: t.category,
+        status: t.status,
+        body: t.components?.find((c) => c.type === 'BODY')?.text || ''
+      }));
+
+    return res.json({ total: templates.length, data: templates });
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ===== fim configurações WhatsApp por empresa =====
+
+// ===== WhatsApp Cloud API – status e teste (admin) =====
 
 /**
  * GET /api/admin/whatsapp/status
